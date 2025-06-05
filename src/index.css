@@ -1,0 +1,150 @@
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%; /* #FFFFFF Blanco */
+    --foreground: 0 0% 0%; /* #000000 Negro Texto */
+    
+    --card: 0 0% 100%; /* #FFFFFF Blanco */
+    --card-foreground: 0 0% 0%; /* #000000 Negro Texto */
+    
+    --popover: 0 0% 100%; /* #FFFFFF Blanco */
+    --popover-foreground: 0 0% 0%; /* #000000 Negro Texto */
+    
+    --primary: 217 89% 61%; /* #276EF1 Azul Primario */
+    --primary-foreground: 0 0% 100%; /* #FFFFFF Blanco */
+    --primary-light: 220 67% 95%; /* #EAF0FB Azul Claro */
+
+    --secondary: 0 0% 95.7%; /* #F4F4F4 Gris Claro */
+    --secondary-foreground: 0 0% 20%; /* Un gris más oscuro para contraste con gris claro */
+    
+    --muted: 0 0% 95.7%; /* #F4F4F4 Gris Claro */
+    --muted-foreground: 0 0% 40%; /* #666666 Gris Texto */
+    
+    --accent: 220 67% 95%; /* #EAF0FB Azul Claro (usado como accent) */
+    --accent-foreground: 217 89% 61%; /* #276EF1 Azul Primario */
+    
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 100%; /* #FFFFFF */
+    
+    --border: 0 0% 87.5%; /* Un gris un poco más oscuro que Gris Claro para bordes #DEDEDE */
+    --input: 0 0% 87.5%; /* Borde de input */
+    --ring: 217 89% 61%; /* #276EF1 Azul Primario */
+
+    --radius: 0.5rem; /* Base radius, puede ser sobreescrito */
+
+    --text-primary: 0 0% 0%; /* #000000 Negro Texto */
+    --text-secondary: 0 0% 40%; /* #666666 Gris Texto */
+  }
+
+  .dark {
+    /* Ajustar colores para modo oscuro si se implementa en el futuro */
+    --background: 0 0% 10%; /* Un gris muy oscuro */
+    --foreground: 0 0% 98%; /* Casi blanco */
+    
+    --card: 0 0% 15%; 
+    --card-foreground: 0 0% 98%;
+    
+    --popover: 0 0% 15%;
+    --popover-foreground: 0 0% 98%;
+    
+    --primary: 217 89% 61%; /* #276EF1 Azul Primario (puede mantenerse) */
+    --primary-foreground: 0 0% 100%; 
+    --primary-light: 220 50% 25%; /* Un azul oscuro para el claro */
+
+    --secondary: 0 0% 20%; 
+    --secondary-foreground: 0 0% 98%;
+    
+    --muted: 0 0% 20%; 
+    --muted-foreground: 0 0% 60%; /* Un gris más claro para texto en modo oscuro */
+    
+    --accent: 220 50% 25%; 
+    --accent-foreground: 217 89% 61%;
+    
+    --destructive: 0 70% 50%;
+    --destructive-foreground: 0 0% 98%;
+    
+    --border: 0 0% 25%;
+    --input: 0 0% 25%;
+    --ring: 217 89% 61%;
+
+    --text-primary: 0 0% 98%;
+    --text-secondary: 0 0% 60%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-text-primary font-sans text-body;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+  h1 { @apply text-h1 font-h1; }
+  h2 { @apply text-h2 font-h2; }
+  p { @apply text-body font-body; }
+  label, span.caption { @apply text-caption font-caption; }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg;
+  }
+  .btn-secondary {
+    @apply bg-card text-primary border border-primary hover:bg-primary-light rounded-lg;
+  }
+  .btn-disabled {
+    @apply bg-muted text-muted-foreground rounded-lg cursor-not-allowed;
+  }
+  .input-default {
+    @apply h-[48px] px-4 border border-border rounded-md placeholder:text-text-secondary focus:border-primary focus:ring-primary;
+  }
+  .card-default {
+    @apply bg-card rounded-lg shadow-subtle;
+  }
+  .badge-default {
+    @apply bg-primary-light text-primary rounded-pill px-3 py-1 text-xs;
+  }
+  .bottom-nav {
+    @apply fixed bottom-0 left-0 right-0 h-16 bg-card border-t md:hidden flex items-center justify-around z-50 shadow-md;
+  }
+  .bottom-nav-item {
+    @apply flex flex-col items-center justify-center text-xs text-text-secondary;
+  }
+  .bottom-nav-item.active {
+    @apply text-primary;
+  }
+}
+
+.hero-gradient {
+  background: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--primary-light)) 100%);
+}
+
+.glass-card {
+  background: hsla(var(--card), 0.8); /* Ligeramente transparente */
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid hsla(var(--border), 0.5);
+}
+
+.dark .glass-card {
+  background: hsla(var(--card), 0.6);
+  border: 1px solid hsla(var(--border), 0.3);
+}
+
+.room-card {
+  transition: all 0.3s ease;
+}
+
+.room-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.07), 0 8px 8px -5px rgba(0, 0, 0, 0.04);
+}
+
+.feature-icon {
+  color: hsl(var(--primary));
+}
