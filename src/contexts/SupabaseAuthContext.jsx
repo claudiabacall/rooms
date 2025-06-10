@@ -1,5 +1,5 @@
 // src/contexts/SupabaseAuthContext.jsx
-import React, { createContext, useContext, useEffect, useState, useCallback } from "react"; // Añadido useCallback
+import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { supabase } from "@/supabaseClient";
 import { useNavigate } from "react-router-dom";
 
@@ -11,123 +11,123 @@ export const SupabaseAuthProvider = ({ children }) => {
     const [loading, setLoading] = useState(true);
     const navigate = useNavigate();
 
-    // Función auxiliar para obtener el perfil y enriquecer el objeto de usuario
-    // Envuelto en useCallback para estabilidad y evitar re-creación innecescesaria
+    // Helper function to fetch the user profile and enrich the user object
+    // Wrapped in useCallback for stability and to prevent unnecessary re-creation
     const fetchUserProfileAndEnrich = useCallback(async (supabaseUser) => {
         if (!supabaseUser) return null;
 
         let onboardingCompleted = false;
 
-        // PRIORIDAD 1: Intentar obtener 'onboarding_completed' de user_metadata de la sesión actual
-        // Esta es la fuente más inmediata de verdad tras un `updateUser` o un `onAuthStateChange`.
+        // PRIORITY 1: Try to get 'onboarding_completed' from user_metadata of the current session
+        // This is the most immediate source of truth after a `updateUser` or an `onAuthStateChange`.
         if (supabaseUser.user_metadata && typeof supabaseUser.user_metadata.onboarding_completed === 'boolean') {
             onboardingCompleted = supabaseUser.user_metadata.onboarding_completed;
         } else {
-            // PRIORIDAD 2: Si no está en user_metadata o no es un booleano, intentar obtenerlo de la tabla 'profiles'
-            // Esto es importante para usuarios existentes o si la metadata no se ha sincronizado aún.
+            // PRIORITY 2: If not in user_metadata or not a boolean, try to get it from the 'profiles' table
+            // This is important for existing users or if metadata hasn't synced yet.
             const { data: profile, error: profileError } = await supabase
                 .from('profiles')
                 .select('onboarding_completed')
                 .eq('id', supabaseUser.id)
                 .single();
 
-            if (profileError && profileError.code !== 'PGRST116') { // PGRST116: no rows found (perfil no existe aún, normal para un nuevo registro antes del onboarding)
+            if (profileError && profileError.code !== 'PGRST116') { // PGRST116: no rows found (profile doesn't exist yet, normal for a new registration before onboarding)
                 console.warn("Error fetching profile for user:", supabaseUser.id, profileError);
             }
-            // Si el perfil existe, usa su valor; de lo contrario, por defecto es false.
+            // If the profile exists, use its value; otherwise, default to false.
             onboardingCompleted = profile?.onboarding_completed || false;
         }
 
         return {
             ...supabaseUser,
-            // email_confirmed_at ya viene en el objeto `supabaseUser` de Supabase Auth
+            // email_confirmed_at already comes in the `supabaseUser` object from Supabase Auth
             onboarding_completed: onboardingCompleted,
-            // Puedes añadir otras propiedades de `profiles` aquí si las quieres en `user` directamente
-            // Por ejemplo: `full_name: supabaseUser.user_metadata?.full_name || profile?.full_name || null,`
-            // O, si `full_name` se actualiza durante el onboarding, podrías sacarlo de `profile`
-            // En tu caso, `full_name` ya lo tienes en `user_metadata`
+            // You can add other `profiles` properties here if you want them directly in `user`
+            // For example: `full_name: supabaseUser.user_metadata?.full_name || profile?.full_name || null,`
+            // Or, if `full_name` is updated during onboarding, you could get it from `profile`
+            // In your case, `full_name` is already in `user_metadata`
         };
-    }, []); // Sin dependencias para useCallback, ya que no usa variables del scope externo que puedan cambiar.
+    }, []); // No dependencies for useCallback, as it doesn't use external scope variables that might change.
 
     useEffect(() => {
         const handleAuthChange = async (event, currentSession) => {
             setSession(currentSession);
             if (currentSession) {
-                // Si hay una sesión activa, enriquecer el usuario
+                // If there's an active session, enrich the user
                 const enrichedUser = await fetchUserProfileAndEnrich(currentSession.user);
                 setUser(enrichedUser);
             } else {
-                // Si no hay sesión, limpiar el usuario
+                // If there's no session, clear the user
                 setUser(null);
             }
-            setLoading(false); // Una vez que se maneja el primer estado, ya no estamos cargando
+            setLoading(false); // Once the initial state is handled, we are no longer loading
         };
 
-        // Escuchar cambios de autenticación en tiempo real
+        // Listen for real-time authentication changes
         const { data: listener } = supabase.auth.onAuthStateChange(handleAuthChange);
 
-        // Obtener la sesión inicial al cargar el componente
+        // Get the initial session when the component loads
         const getInitialSession = async () => {
             const { data: { session: initialSession }, error } = await supabase.auth.getSession();
             if (error) {
                 console.error("Error getting initial session:", error);
             }
-            // Disparar el manejador de cambio de autenticación para procesar la sesión inicial
-            // Esto asegura que `user` y `session` se establezcan correctamente al cargar la app.
+            // Trigger the authentication change handler to process the initial session
+            // This ensures that `user` and `session` are set correctly when the app loads.
             handleAuthChange(null, initialSession);
         };
 
         getInitialSession();
 
-        // Limpiar el listener al desmontar el componente
+        // Clean up the listener when the component unmounts
         return () => {
             listener.subscription.unsubscribe();
         };
-    }, [fetchUserProfileAndEnrich]); // Dependencia de fetchUserProfileAndEnrich
+    }, [fetchUserProfileAndEnrich]); // Dependency on fetchUserProfileAndEnrich
 
     const register = async ({ email, password, fullName }) => {
-        // Al registrar, establecemos 'full_name' y 'onboarding_completed: false' en user_metadata
-        // Esto es útil para que Supabase Auth mantenga un registro y para que la metadata esté lista.
+        // Upon registration, set 'full_name' and 'onboarding_completed: false' in user_metadata
+        // This is useful for Supabase Auth to keep a record and for metadata to be ready.
         const { data, error } = await supabase.auth.signUp({
             email,
             password,
             options: {
                 data: {
                     full_name: fullName,
-                    onboarding_completed: false, // Inicializar en user_metadata para el nuevo usuario
+                    onboarding_completed: false, // Initialize in user_metadata for the new user
                 },
             },
         });
         if (error) throw error;
 
-        // Crear una entrada inicial en la tabla 'profiles' para el nuevo usuario.
-        // Es crucial que esta entrada tenga `onboarding_completed: false` para que la lógica
-        // de `PrivateRoute` y `OnboardingPage` funcione correctamente.
+        // Create an initial entry in the 'profiles' table for the new user.
+        // It's crucial that this entry has `onboarding_completed: false` for the
+        // `PrivateRoute` and `OnboardingPage` logic to work correctly.
         if (data && data.user) {
             const { error: profileCreationError } = await supabase
                 .from('profiles')
-                .insert({
+                .upsert({ // <-- KEY CHANGE: Use upsert instead of insert
                     id: data.user.id,
-                    full_name: fullName, // Duplicar aquí si quieres tenerlo en profiles también
-                    onboarding_completed: false, // También inicializar en la tabla profiles
-                    email: email // Opcional: guardar email en profiles si es necesario
-                });
+                    full_name: fullName, // Duplicate here if you want it in profiles too
+                    onboarding_completed: false, // Also initialize in the profiles table
+                    email: email // Optional: save email in profiles if necessary
+                }, { onConflict: 'id' }); // <-- Specify the conflict column (your primary key, which should be 'id')
             if (profileCreationError) {
                 console.error("Error creating initial profile:", profileCreationError);
-                // NOTA: Si el perfil no se crea aquí, `fetchUserProfileAndEnrich`
-                // en el `onAuthStateChange` tendrá que manejar el caso de `profile` ser `null`.
-                // Tu actual `fetchUserProfileAndEnrich` ya lo maneja bien con `profile?.onboarding_completed || false`.
+                // NOTE: If the profile is not created here, `fetchUserProfileAndEnrich`
+                // in `onAuthStateChange` will have to handle the case where `profile` is `null`.
+                // Your current `fetchUserProfileAndEnrich` already handles this well with `profile?.onboarding_completed || false`.
             }
         }
-        // onAuthStateChange se encargará de actualizar el estado `user` del contexto con el user enriquecido.
+        // onAuthStateChange will take care of updating the context's `user` state with the enriched user.
         return { user: data.user };
     };
 
     const login = async ({ email, password }) => {
         const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
-        // onAuthStateChange se encargará de actualizar 'user' y 'session'
-        return { user: data.user }; // Devuelve `data.user` que es el user de Supabase
+        // onAuthStateChange will take care of updating 'user' and 'session'
+        return { user: data.user }; // Returns `data.user` which is the Supabase user
     };
 
     const logout = async () => {
@@ -136,65 +136,65 @@ export const SupabaseAuthProvider = ({ children }) => {
             console.error("Error during logout:", error);
             throw error;
         }
-        // Limpiar el estado local al cerrar sesión
+        // Clear local state upon logout
         setUser(null);
         setSession(null);
-        navigate("/login", { replace: true }); // Redirigir al login y reemplazar el historial
+        navigate("/login", { replace: true }); // Redirect to login and replace history
     };
 
     /**
-     * Función genérica para actualizar el perfil del usuario (tabla 'profiles')
-     * y, opcionalmente, la metadata del usuario de autenticación de Supabase.
-     * @param {object} profileUpdates - Objeto con los datos a actualizar en la tabla 'profiles'.
-     * @param {object} [authMetadataUpdates={}] - Objeto con los datos a actualizar en la user_metadata de Auth.
-     * Ej: { full_name: 'Nuevo Nombre', onboarding_completed: true }
+     * Generic function to update the user profile ('profiles' table)
+     * and, optionally, the Supabase authentication user metadata.
+     * @param {object} profileUpdates - Object with data to update in the 'profiles' table.
+     * @param {object} [authMetadataUpdates={}] - Object with data to update in Auth user_metadata.
+     * Ex: { full_name: 'New Name', onboarding_completed: true }
      */
     const updateProfile = async (profileUpdates, authMetadataUpdates = {}) => {
         try {
             if (!user) throw new Error("No user logged in to update profile.");
 
-            // 1. Actualiza la tabla 'profiles'
+            // 1. Update the 'profiles' table
             const { error: profileError } = await supabase
                 .from("profiles")
                 .update(profileUpdates)
-                .eq('id', user.id); // Asegurarse de que el ID sea el del usuario actual
+                .eq('id', user.id); // Ensure the ID is that of the current user
 
             if (profileError) throw profileError;
 
-            // 2. Opcional: Actualiza la user_metadata de la autenticación de Supabase
-            // Esto es crucial para que `user.user_metadata` esté siempre sincronizado
-            // y para que propiedades como `onboarding_completed` se reflejen de inmediato
-            // en el objeto user que viene de Supabase Auth.
-            let latestSupabaseUser = user; // Inicializar con el user actual
+            // 2. Optional: Update Supabase authentication user_metadata
+            // This is crucial for `user.user_metadata` to always be in sync
+            // and for properties like `onboarding_completed` to reflect immediately
+            // in the user object coming from Supabase Auth.
+            let latestSupabaseUser = user; // Initialize with the current user
 
             if (Object.keys(authMetadataUpdates).length > 0) {
                 const { data: updateData, error: authUpdateError } = await supabase.auth.updateUser({
                     data: authMetadataUpdates,
                 });
                 if (authUpdateError) throw authUpdateError;
-                // Si la actualización de auth fue exitosa, usa el user devuelto
-                // Supabase.auth.updateUser devuelve { user, session } o { data: { user, session } }
-                // Dependiendo de la versión de Supabase JS, podría ser data.user
-                latestSupabaseUser = updateData.user || latestSupabaseUser; // Usar el user actualizado si está disponible
+                // If auth update was successful, use the returned user
+                // Supabase.auth.updateUser returns { user, session } or { data: { user, session } }
+                // Depending on the Supabase JS version, it might be data.user
+                latestSupabaseUser = updateData.user || latestSupabaseUser; // Use the updated user if available
             }
 
-            // 3. Forzar una actualización del estado del usuario en el contexto
-            // Incluso si `supabase.auth.updateUser` devuelve el user actualizado,
-            // `onAuthStateChange` no siempre se dispara para `updateUser` de metadata.
-            // Es buena práctica asegurarse de que el `user` del contexto se refresque.
+            // 3. Force an update of the user state in the context
+            // Even if `supabase.auth.updateUser` returns the updated user,
+            // `onAuthStateChange` does not always fire for `updateUser` of metadata.
+            // It's good practice to ensure the context's `user` is refreshed.
             const { data: { user: refreshedUser }, error: getUserError } = await supabase.auth.getUser();
             if (getUserError) {
                 console.error("Error fetching latest user after profile update:", getUserError);
-                // No lanzar error aquí si el update de profile ya fue exitoso, solo loguear
+                // Do not throw error here if the profile update was already successful, just log
             } else {
-                latestSupabaseUser = refreshedUser; // Usar el user más reciente de la sesión si se obtuvo correctamente
+                latestSupabaseUser = refreshedUser; // Use the most recent user from the session if successfully obtained
             }
 
-            // Enriquecer el usuario con los últimos datos de la tabla 'profiles' y metadata.
+            // Enrich the user with the latest data from the 'profiles' table and metadata.
             const enrichedLatestUser = await fetchUserProfileAndEnrich(latestSupabaseUser);
-            setUser(enrichedLatestUser); // Actualiza el estado `user` del contexto
+            setUser(enrichedLatestUser); // Update the context's `user` state
 
-            return { user: enrichedLatestUser }; // Devolver el user actualizado
+            return { user: enrichedLatestUser }; // Return the updated user
         } catch (error) {
             console.error("Error updating profile:", error);
             throw error;
@@ -208,8 +208,8 @@ export const SupabaseAuthProvider = ({ children }) => {
         register,
         login,
         logout,
-        updateProfile, // Ahora exportamos esta función
-        loading, // Estado de carga inicial del contexto de autenticación
+        updateProfile, // Now export this function
+        loading, // Initial loading state of the authentication context
     };
 
     return <AuthContext.Provider value={value}>{!loading && children}</AuthContext.Provider>;

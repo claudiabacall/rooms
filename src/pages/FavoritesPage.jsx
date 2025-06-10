@@ -1,173 +1,116 @@
-// src/hooks/useFavorites.js
-import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '@/supabaseClient'; // Make sure this path is correct
-import { useAuth } from '@/contexts/SupabaseAuthContext'; // Make sure this path is correct
-import { useToast } from "@/components/ui/use-toast"; // For displaying notifications
+// src/pages/FavoritesPage.jsx
+import React, { useEffect, useState, useCallback } from 'react';
+import useFavorites from '@/hooks/useFavorites'; // Asegúrate que esta ruta sea correcta
+import { supabase } from '@/supabaseClient'; // Necesario para obtener los detalles de las habitaciones
+import { useAuth } from '@/contexts/SupabaseAuthContext'; // Para verificar si el usuario está logueado
+import { Link } from 'react-router-dom'; // Para navegar a la página de detalles de la habitación
+import { HeartCrack, Loader2 } from 'lucide-react'; // Iconos para favoritos vacíos y carga
+import { Button } from '@/components/ui/button'; // Si usas componentes Shadcn/ui
+import RoomCard from '@/components/rooms/RoomCard.jsx'; // ¡Importamos el RoomCard!
 
-// Assuming you have a table in Supabase like this:
-// CREATE TABLE user_favorites (
-//   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-//   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
-//   item_id UUID, -- Or TEXT, depending on your item IDs (e.g., room_id, profile_id)
-//   item_type TEXT, -- 'user' or 'property' or 'community'
-//   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-//   UNIQUE (user_id, item_id, item_type) -- Ensures a user can't favorite the same item multiple times
-// );
-// You will also need RLS policies on this table for SELECT, INSERT, DELETE
+const FavoritesPage = () => {
+  const { user, loading: authLoading } = useAuth();
+  const { favorites, loading: favoritesLoading, removeFavorite, addFavorite, isFavorite } = useFavorites();
+  const [favoriteRoomsDetails, setFavoriteRoomsDetails] = useState([]);
+  const [fetchingRoomDetails, setFetchingRoomDetails] = useState(true);
 
-const useFavorites = () => {
-  const { user } = useAuth(); // Get the current authenticated user
-  const { toast } = useToast();
-  const [favorites, setFavorites] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  // Function to fetch favorites for the current user
-  const fetchFavorites = useCallback(async () => {
-    if (!user) {
-      setFavorites([]);
-      setLoading(false);
+  // Función para obtener los detalles completos de las habitaciones favoritas
+  const fetchFavoriteRoomDetails = useCallback(async (roomIds) => {
+    if (roomIds.length === 0) {
+      setFavoriteRoomsDetails([]);
+      setFetchingRoomDetails(false);
       return;
     }
 
-    setLoading(true);
+    setFetchingRoomDetails(true);
     try {
       const { data, error } = await supabase
-        .from('user_favorites') // Replace with your actual Supabase favorites table name
-        .select('*')
-        .eq('user_id', user.id);
+        .from('rooms')
+        // Selecciona todas las columnas, incluyendo 'image_urls' y 'host_profile'
+        .select('*, host_profile:profiles(id, full_name, avatar_url)')
+        .in('id', roomIds); // Filtra directamente en la base de datos
 
       if (error) {
         throw error;
       }
 
-      // Convert the fetched raw favorite data into a more usable format
-      // You'll need to decide how to fetch the actual item details (room, profile)
-      // For now, we'll just store the raw favorite metadata.
-      // In a real app, you'd likely fetch the full item details here or in the consuming component.
-      setFavorites(data || []);
+      // IMPORTANTE: Mapear la columna 'image_urls' a 'imageUrl'
+      const mappedRooms = data.map(room => ({
+        ...room,
+        // Si 'image_urls' es un array, toma el primer elemento.
+        // Si puede ser null o vacío, proporciona un fallback.
+        imageUrl: (room.image_urls && room.image_urls.length > 0) ? room.image_urls[0] : null,
+      }));
+
+      setFavoriteRoomsDetails(mappedRooms || []);
 
     } catch (err) {
-      console.error("Error fetching favorites:", err.message);
-      toast({
-        title: "Error al cargar favoritos",
-        description: err.message,
-        variant: "destructive",
-      });
-      setFavorites([]);
+      console.error("Error al obtener detalles de habitaciones favoritas:", err.message);
+      setFavoriteRoomsDetails([]);
     } finally {
-      setLoading(false);
+      setFetchingRoomDetails(false);
     }
-  }, [user, toast]);
+  }, []);
 
+  // useEffect para re-obtener los detalles de las habitaciones cuando cambian los favorites
   useEffect(() => {
-    fetchFavorites();
-
-    // Set up real-time listener for user_favorites changes
-    // This is optional but provides immediate updates if favorites change elsewhere
-    const favoriteChanges = supabase
-      .channel('favorites_channel')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'user_favorites', filter: `user_id=eq.${user?.id}` },
-        (payload) => {
-          console.log('Realtime favorite change:', payload);
-          // Refetch favorites to ensure the list is up-to-date
-          fetchFavorites();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(favoriteChanges);
-    };
-
-  }, [user, fetchFavorites]); // Re-run effect if user or fetchFavorites changes
-
-  // Function to add an item to favorites
-  const addFavorite = useCallback(async (itemToAdd) => {
-    if (!user) {
-      toast({
-        title: "No autenticado",
-        description: "Inicia sesión para guardar favoritos.",
-        variant: "destructive",
-      });
-      return;
+    if (!favoritesLoading && favorites) {
+      fetchFavoriteRoomDetails(favorites);
     }
+  }, [favorites, favoritesLoading, fetchFavoriteRoomDetails]);
 
-    try {
-      const { data, error } = await supabase
-        .from('user_favorites')
-        .insert({
-          user_id: user.id,
-          item_id: itemToAdd.id, // ID of the room, profile, etc.
-          item_type: itemToAdd.type, // 'user', 'property', 'community'
-        })
-        .select()
-        .single();
+  // Manejo de estados de carga y autenticación
+  if (authLoading || favoritesLoading || fetchingRoomDetails) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <Loader2 className="h-8 w-8 animate-spin text-gray-500" />
+        <p className="ml-2 text-gray-600">Cargando favoritos...</p>
+      </div>
+    );
+  }
 
-      if (error) {
-        if (error.code === '23505') { // PostgreSQL unique violation error code
-          toast({
-            title: "Ya en favoritos",
-            description: "Este elemento ya está en tus favoritos.",
-          });
-        } else {
-          throw error;
-        }
-      } else {
-        setFavorites(prev => [...prev, data]); // Add the new favorite metadata
-        toast({
-          title: "Añadido a favoritos",
-          description: "Elemento guardado con éxito.",
-        });
-      }
-    } catch (err) {
-      console.error("Error adding favorite:", err.message);
-      toast({
-        title: "Error al añadir favorito",
-        description: err.message,
-        variant: "destructive",
-      });
-    }
-  }, [user, toast]);
+  if (!user) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen p-4 text-center">
+        <p className="text-xl font-semibold mb-4">Inicia sesión para ver tus favoritos.</p>
+        <Link to="/login">
+          <Button>Iniciar Sesión</Button>
+        </Link>
+      </div>
+    );
+  }
 
-  // Function to remove an item from favorites
-  const removeFavorite = useCallback(async (itemId, itemType) => {
-    if (!user) return;
+  if (favoriteRoomsDetails.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen p-4 text-center">
+        <HeartCrack className="h-24 w-24 text-gray-400 mb-6" />
+        <h2 className="text-2xl font-bold mb-2">Aún no tienes favoritos</h2>
+        <p className="text-gray-600 mb-6">Empieza a explorar y guarda los pisos que más te gusten.</p>
+        <Link to="/habitaciones">
+          <Button>Buscar Habitaciones</Button>
+        </Link>
+      </div>
+    );
+  }
 
-    try {
-      const { error } = await supabase
-        .from('user_favorites')
-        .delete()
-        .eq('user_id', user.id)
-        .eq('item_id', itemId)
-        .eq('item_type', itemType);
+  return (
+    <div className="container mx-auto p-4 pt-12">
+      <h1 className="text-3xl font-bold mb-8 text-center">Tus Habitaciones Favoritas</h1>
 
-      if (error) {
-        throw error;
-      }
-
-      setFavorites(prev => prev.filter(fav => !(fav.item_id === itemId && fav.item_type === itemType)));
-      toast({
-        title: "Eliminado de favoritos",
-        description: "Elemento eliminado de tus favoritos.",
-      });
-    } catch (err) {
-      console.error("Error removing favorite:", err.message);
-      toast({
-        title: "Error al eliminar favorito",
-        description: err.message,
-        variant: "destructive",
-      });
-    }
-  }, [user, toast]);
-
-  // Function to check if an item is favorited
-  const isFavorite = useCallback((itemId, itemType) => {
-    return favorites.some(fav => fav.item_id === itemId && fav.item_type === itemType);
-  }, [favorites]);
-
-  return { favorites, loading, addFavorite, removeFavorite, isFavorite };
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+        {favoriteRoomsDetails.map((room) => (
+          <RoomCard
+            key={room.id}
+            room={room} // Este 'room' ahora tiene la propiedad 'imageUrl' gracias al mapeo
+            currentUser={user}
+            isRoomFavorite={isFavorite(room.id)}
+            onAddFavorite={addFavorite}
+            onRemoveFavorite={removeFavorite}
+          />
+        ))}
+      </div>
+    </div>
+  );
 };
 
-export default useFavorites;
+export default FavoritesPage;

@@ -1,3 +1,4 @@
+// src/components/rooms/RoomFilters.jsx
 import React from "react";
 import { motion } from "framer-motion";
 import { Card } from "@/components/ui/card";
@@ -5,19 +6,39 @@ import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { X, Wifi, ParkingCircle, Bath, BedDouble, Coffee } from "lucide-react";
+import {
+  X,
+  Wifi,
+  Utensils, // Cambiado Coffee por Utensils para cocina
+  Bath,
+  ParkingCircle,
+  Bed, // Icono para Amueblado (Bed o Home)
+  Tv, // Para TV
+  Fan, // Para Aire Acondicionado
+  WashingMachine, // Para Lavadora
+  // Puedes añadir más iconos de Lucide si necesitas para otros amenities
+} from "lucide-react";
 
+// Lista de comodidades, con IDs que coinciden con las claves booleanas de tu DB
 const amenitiesList = [
-  { id: "wifi", label: "Wi-Fi", icon: <Wifi className="h-4 w-4 mr-2" /> },
-  { id: "kitchen", label: "Cocina", icon: <Coffee className="h-4 w-4 mr-2" /> },
-  { id: "private_bathroom", label: "Baño Privado", icon: <Bath className="h-4 w-4 mr-2" /> },
-  { id: "parking", label: "Parking", icon: <ParkingCircle className="h-4 w-4 mr-2" /> },
-  { id: "desk", label: "Escritorio", icon: <BedDouble className="h-4 w-4 mr-2" /> },
-  { id: "balcony", label: "Balcón", icon: <BedDouble className="h-4 w-4 mr-2" /> },
-  { id: "air_conditioning", label: "Aire Acondicionado", icon: <BedDouble className="h-4 w-4 mr-2" /> },
-  { id: "quiet_zone", label: "Zona Tranquila", icon: <BedDouble className="h-4 w-4 mr-2" /> },
+  { id: "has_wifi", label: "Wi-Fi", icon: <Wifi className="h-4 w-4 mr-2" /> },
+  { id: "has_kitchen_access", label: "Acceso Cocina", icon: <Utensils className="h-4 w-4 mr-2" /> },
+  { id: "has_private_bathroom", label: "Baño Privado", icon: <Bath className="h-4 w-4 mr-2" /> },
+  { id: "has_parking", label: "Parking", icon: <ParkingCircle className="h-4 w-4 mr-2" /> },
+  { id: "is_furnished", label: "Amueblado", icon: <Bed className="h-4 w-4 mr-2" /> }, // Asumiendo 'is_furnished' para amueblado
+  { id: "has_tv", label: "TV", icon: <Tv className="h-4 w-4 mr-2" /> }, // Añadido TV
+  { id: "has_air_condition", label: "Aire Acondicionado", icon: <Fan className="h-4 w-4 mr-2" /> }, // Añadido Aire Acondicionado
+  { id: "has_washing_room", label: "Lavadora", icon: <WashingMachine className="h-4 w-4 mr-2" /> }, // Añadido Lavadora
+  // Los siguientes no tienen correspondencia directa en tu mapeo de DB actual,
+  // si los necesitas, asegúrate de añadirlos como columnas booleanas en tu tabla 'rooms'
+  // y mapearlos en roomsService.js.
+  // { id: "desk", label: "Escritorio", icon: <BedDouble className="h-4 w-4 mr-2" /> },
+  // { id: "balcony", label: "Balcón", icon: <BedDouble className="h-4 w-4 mr-2" /> },
+  // { id: "quiet_zone", label: "Zona Tranquila", icon: <BedDouble className="h-4 w-4 mr-2" /> },
 ];
 
+// Los tipos de habitación de tu DB no están en el mapeo de roomsService.js.
+// Si los necesitas, deberías añadirlos a la tabla 'rooms' y mapearlos.
 const roomTypes = ["all", "Privada", "Compartida", "Estudio", "Apartamento", "Loft", "Ático"];
 
 const RoomFilters = ({
@@ -26,8 +47,8 @@ const RoomFilters = ({
   setPriceRange,
   selectedAmenities,
   handleAmenityChange,
-  selectedType,
-  setSelectedType,
+  selectedType, // Se mantiene, pero su funcionalidad depende de que tengas un campo 'type' en tu DB
+  setSelectedType, // Se mantiene
   resetFilters,
   availableStartDate,
   setAvailableStartDate,
@@ -50,7 +71,8 @@ const RoomFilters = ({
             <Slider
               id="price-range"
               min={0}
-              max={1000}
+              // El máximo debería ser realista, 1000 era un poco bajo para algunos escenarios
+              max={2000} // Ajustado a 2000, puedes cambiarlo según tus necesidades
               step={10}
               value={priceRange}
               onValueChange={setPriceRange}
@@ -70,7 +92,9 @@ const RoomFilters = ({
                 <div key={amenity.id} className="flex items-center space-x-2">
                   <Checkbox
                     id={`filter-${amenity.id}`}
+                    // Comprobamos si el ID del amenity (ej. "has_wifi") está en el array selectedAmenities
                     checked={selectedAmenities.includes(amenity.id)}
+                    // Cuando se hace clic, pasamos el ID del amenity (ej. "has_wifi")
                     onCheckedChange={() => handleAmenityChange(amenity.id)}
                   />
                   <Label htmlFor={`filter-${amenity.id}`} className="flex items-center text-sm font-normal cursor-pointer">
@@ -81,7 +105,7 @@ const RoomFilters = ({
             </div>
           </div>
 
-          {/* Tipo de habitación */}
+          {/* Tipo de habitación (funcionalidad pendiente de campo 'type' en DB) */}
           <div>
             <Label htmlFor="room-type" className="text-lg font-semibold mb-2 block">Tipo de Piso/Habitación</Label>
             <select

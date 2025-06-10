@@ -16,7 +16,7 @@ import ProfilePage from "@/pages/ProfilePage.jsx";
 import CommunitiesPage from "@/pages/CommunitiesPage.jsx";
 import CreateCommunityPage from "@/pages/CreateCommunityPage.jsx";
 import CommunityDetailPage from "@/pages/CommunityDetailPage.jsx";
-import CommunitySettingsPage from "@/pages/CommunitySettingsPage.jsx"; // <-- Importación de la nueva página de ajustes
+import CommunitySettingsPage from "@/pages/CommunitySettingsPage.jsx";
 import ChatPage from "@/pages/ChatPage.jsx";
 import RegisterPage from "@/pages/RegisterPage.jsx";
 import OnboardingPage from "@/pages/OnboardingPage.jsx";
@@ -25,7 +25,10 @@ import LoginPage from "@/pages/LoginPage.jsx";
 import TermsPage from "@/pages/TermsPage.jsx";
 import MarketplacePage from "@/pages/MarketplacePage.jsx";
 import AdminDashboardPage from "@/pages/AdminDashboardPage.jsx";
-import AddRoomPage from "@/pages/AddRoomPage.jsx";
+import AddRoomPage from "@/pages/AddRoomPage.jsx"; // <-- ¡CORREGIDO! Usamos AddRoomPage
+import MyPropertiesPage from "@/pages/MyPropertiesPage.jsx";
+import EditRoomPage from "@/pages/EditRoomPage.jsx";
+
 
 /**
  * PrivateRoute: Protege rutas que requieren autenticación, email confirmado Y onboarding completo.
@@ -42,7 +45,6 @@ const PrivateRoute = ({ children }) => {
     return <Navigate to="/login" replace state={{ from: location }} />;
   }
 
-  // Si el usuario está autenticado, pero el email NO está confirmado
   if (!user?.email_confirmed_at) {
     if (location.pathname !== "/verify-email") {
       return <Navigate to="/verify-email" replace state={{ from: location }} />;
@@ -50,8 +52,6 @@ const PrivateRoute = ({ children }) => {
     return children;
   }
 
-  // Si el usuario está autenticado y el email está confirmado,
-  // pero el onboarding NO está completo
   if (!user?.onboarding_completed) {
     if (location.pathname !== "/onboarding") {
       return <Navigate to="/onboarding" replace state={{ from: location }} />;
@@ -59,7 +59,6 @@ const PrivateRoute = ({ children }) => {
     return children;
   }
 
-  // Si todo está OK (autenticado, email confirmado, onboarding completo), permite el acceso
   return children;
 };
 
@@ -87,12 +86,10 @@ const OnboardingSpecificRoute = ({ children }) => {
     return children;
   }
 
-  // Si el onboarding YA está completo, redirige al perfil
   if (user?.onboarding_completed) {
     return <Navigate to="/perfil" replace state={{ from: location }} />;
   }
 
-  // Si el usuario está autenticado, email confirmado, y onboarding NO completo, permite acceso
   return children;
 };
 
@@ -111,26 +108,31 @@ function AppContent() {
           <Route path="marketplace" element={<MarketplacePage />} />
 
           {/* Rutas que requieren autenticación y verificaciones */}
-          {/* La página de onboarding ahora usa OnboardingSpecificRoute */}
           <Route path="onboarding" element={<OnboardingSpecificRoute><OnboardingPage /></OnboardingSpecificRoute>} />
 
           {/* El resto de las rutas privadas sí deben asegurar que el onboarding esté completo */}
           <Route path="habitaciones" element={<PrivateRoute><RoomsPage /></PrivateRoute>} />
-          <Route path="habitaciones/:id" element={<PrivateRoute><RoomDetailPage /></PrivateRoute>} />
+          <Route path="habitacion/:id" element={<PrivateRoute><RoomDetailPage /></PrivateRoute>} />
           <Route path="favoritos" element={<PrivateRoute><FavoritesPage /></PrivateRoute>} />
           <Route path="perfil" element={<PrivateRoute><ProfilePage /></PrivateRoute>} />
           <Route path="perfil/:userId" element={<PrivateRoute><ProfilePage /></PrivateRoute>} />
           <Route path="comunidades" element={<PrivateRoute><CommunitiesPage /></PrivateRoute>} />
           <Route path="comunidades/crear" element={<PrivateRoute><CreateCommunityPage /></PrivateRoute>} />
           <Route path="comunidades/:communityId" element={<PrivateRoute><CommunityDetailPage /></PrivateRoute>} />
-          {/* Ruta para la página de ajustes de la comunidad */}
           <Route path="comunidades/:communityId/ajustes" element={<PrivateRoute><CommunitySettingsPage /></PrivateRoute>} />
           <Route path="chat" element={<PrivateRoute><ChatPage /></PrivateRoute>} />
           <Route path="chat/:chatId" element={<PrivateRoute><ChatPage /></PrivateRoute>} />
           <Route path="admin" element={<PrivateRoute><AdminDashboardPage /></PrivateRoute>} />
-          <Route path="añadir" element={<PrivateRoute><AddRoomPage /></PrivateRoute>} />
+          {/* Ruta para crear habitación */}
+          <Route path="crear-habitacion" element={<PrivateRoute><AddRoomPage /></PrivateRoute>} /> {/* ¡CORREGIDO! Usamos AddRoomPage */}
+          {/* Ruta para Mis Propiedades */}
+          <Route path="mis-propiedades" element={<PrivateRoute><MyPropertiesPage /></PrivateRoute>} />
+          {/* Ruta para Editar Habitación (asumiendo que el componente EditRoomPage se creará) */}
+          <Route path="editar-habitacion/:id" element={<PrivateRoute><EditRoomPage /></PrivateRoute>} />
+
           <Route path="reviews/property/:roomId" element={<PrivateRoute><div>Reviews for Room</div></PrivateRoute>} />
           <Route path="reviews/:userId" element={<PrivateRoute><div>Reviews for User</div></PrivateRoute>} />
+
 
           {/* Ruta de fallback para 404 - Asegúrate de que esta esté al final */}
           <Route path="*" element={<Navigate to="/" replace />} />

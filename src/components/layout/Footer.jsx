@@ -6,7 +6,7 @@ const Footer = () => {
   return (
     <footer className="border-t bg-muted/40 py-8 text-center">
       <div className="container text-sm text-muted-foreground">
-        <p>&copy; {new Date().getFullYear()} Rooms. Todos los derechos reservados.</p>
+        <p>&copy; {new Date().getFullYear()} rooms 2025. Todos los derechos reservados.</p>
 
       </div>
     </footer>

@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Send, Smile, Search, MessageSquare, Trash2 } from "lucide-react";
+import { Send, Smile, Search, MessageSquare, Trash2, ArrowLeft } from "lucide-react"; // Importar ArrowLeft
 import { useParams, Link, useNavigate } from "react-router-dom";
 
 import { supabase } from '../supabaseClient';
@@ -19,7 +19,7 @@ const ChatPage = () => {
   const messagesEndRef = useRef(null);
   const chatSubscriptionRef = useRef(null);
   const presenceChannelRef = useRef(null);
-  const chatParticipantsSubscriptionRef = useRef(null); // NUEVA REF para la suscripción de participantes
+  const chatParticipantsSubscriptionRef = useRef(null);
   const [onlineUsers, setOnlineUsers] = useState(new Set());
   const navigate = useNavigate();
 
@@ -29,6 +29,20 @@ const ChatPage = () => {
 
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const inputRef = useRef(null);
+
+  // Nuevo estado para controlar la vista en móvil
+  const [showChatList, setShowChatList] = useState(true);
+
+  // Determinar si estamos en vista de chat activo en móvil
+  useEffect(() => {
+    // Si hay un chatId en la URL, y la pantalla es pequeña, ocultar la lista de chats
+    if (chatId) {
+      setShowChatList(false);
+    } else {
+      setShowChatList(true);
+    }
+  }, [chatId]);
+
 
   useEffect(() => {
     const getMyProfile = async () => {
@@ -186,7 +200,6 @@ const ChatPage = () => {
         presenceChannelRef.current = null;
         setOnlineUsers(new Set());
       }
-      // Asegurarse de limpiar también la suscripción de participantes al cambiar de chat o al salir
       if (chatParticipantsSubscriptionRef.current) {
         supabase.removeChannel(chatParticipantsSubscriptionRef.current);
         chatParticipantsSubscriptionRef.current = null;
@@ -378,7 +391,6 @@ const ChatPage = () => {
       presenceChannelRef.current = presenceChannel;
     };
 
-    // --- NUEVA FUNCIÓN DE SUSCRIPCIÓN PARA CHAT_PARTICIPANTS ---
     const subscribeToChatParticipantsChanges = () => {
       console.log("Subscribing to chat_participants changes for current user.");
 
@@ -398,8 +410,6 @@ const ChatPage = () => {
           },
           (payload) => {
             console.log("Chat participant update received:", payload);
-            // Cuando hay un update en mi participación (especialmente last_read_at),
-            // volvemos a cargar los chats para recalcular los no leídos.
             fetchUserChats();
           }
         )
@@ -407,13 +417,12 @@ const ChatPage = () => {
 
       chatParticipantsSubscriptionRef.current = channel;
     };
-    // -------------------------------------------------------------
 
     loadCurrentChatDetails();
     loadMessages();
     subscribeToNewMessages();
     setupPresence();
-    subscribeToChatParticipantsChanges(); // Llamar a la nueva suscripción
+    subscribeToChatParticipantsChanges();
 
     return () => {
       console.log(`Cleaning up subscriptions for chat ID: ${chatId}`);
@@ -426,13 +435,12 @@ const ChatPage = () => {
         presenceChannelRef.current = null;
         setOnlineUsers(new Set());
       }
-      // Limpiar la nueva suscripción también
       if (chatParticipantsSubscriptionRef.current) {
         supabase.removeChannel(chatParticipantsSubscriptionRef.current);
         chatParticipantsSubscriptionRef.current = null;
       }
     };
-  }, [chatId, myProfileId, fetchUserChats]); // Añadir fetchUserChats a las dependencias
+  }, [chatId, myProfileId, fetchUserChats]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -468,34 +476,30 @@ const ChatPage = () => {
     }
 
     try {
-      const { data: existingParticipations, error: existingParticipationsError } = await supabase
-        .from('chat_participants')
-        .select('chat_id, profile_id')
-        .in('profile_id', [myProfileId, otherProfileId]);
+      // Intenta encontrar un chat directo existente entre los dos usuarios
+      const { data: existingChats, error: existingChatsError } = await supabase
+        .from('chats')
+        .select('id, chat_participants(profile_id)')
+        .eq('type', 'direct')
+        .contains('chat_participants.profile_id', [myProfileId, otherProfileId]); // Busca chats que contengan ambos IDs de perfil
 
-      if (existingParticipationsError) throw existingParticipationsError;
+      if (existingChatsError) throw existingChatsError;
 
-      let existingChatId = null;
-      if (existingParticipations && existingParticipations.length > 0) {
-        const potentialChatIds = {};
-        existingParticipations.forEach(p => {
-          if (!potentialChatIds[p.chat_id]) {
-            potentialChatIds[p.chat_id] = new Set();
-          }
-          potentialChatIds[p.chat_id].add(p.profile_id);
-        });
-
-        for (const cId in potentialChatIds) {
-          if (potentialChatIds[cId].has(myProfileId) && potentialChatIds[cId].has(otherProfileId)) {
-            existingChatId = cId;
+      let foundChatId = null;
+      if (existingChats && existingChats.length > 0) {
+        // Filtra para asegurar que el chat tiene EXACTAMENTE a estos dos participantes
+        for (const chat of existingChats) {
+          const participantIds = chat.chat_participants.map(p => p.profile_id);
+          if (participantIds.length === 2 && participantIds.includes(myProfileId) && participantIds.includes(otherProfileId)) {
+            foundChatId = chat.id;
             break;
           }
         }
       }
 
-      if (existingChatId) {
-        console.log("Chat existente encontrado:", existingChatId);
-        navigate(`/chat/${existingChatId}`);
+      if (foundChatId) {
+        console.log("Chat existente encontrado:", foundChatId);
+        navigate(`/chat/${foundChatId}`);
         return;
       }
 
@@ -570,6 +574,7 @@ const ChatPage = () => {
     setSearchTerm("");
     setSearchResults([]);
     startNewDirectChat(profileId);
+    setShowChatList(false); // Ocultar lista de chats al iniciar un chat directo en móvil
   };
 
   const onEmojiClick = (emojiObject) => {
@@ -600,7 +605,7 @@ const ChatPage = () => {
   return (
     <div className="container mx-auto h-[calc(100vh-128px)] flex border rounded-lg shadow-xl my-4 overflow-hidden">
       {/* Sidebar de Chats */}
-      <aside className="w-1/3 border-r bg-muted/50 flex flex-col">
+      <aside className={`flex-col md:flex w-full md:w-1/3 border-r bg-muted/50 ${showChatList ? 'flex' : 'hidden'}`}>
         <div className="p-4 border-b">
           <div className="relative">
             <Input
@@ -613,7 +618,7 @@ const ChatPage = () => {
           </div>
           {/* Resultados de la búsqueda */}
           {searchTerm.length > 0 && searchResults.length > 0 && (
-            <div className="absolute z-10 w-[calc(33.33%-2rem)] bg-popover border rounded-md shadow-lg mt-2 overflow-hidden max-h-60 overflow-y-auto">
+            <div className="absolute z-10 w-[calc(100%-2rem)] md:w-[calc(33.33%-2rem)] bg-popover border rounded-md shadow-lg mt-2 overflow-hidden max-h-60 overflow-y-auto">
               {searchResults.map((user) => (
                 <div
                   key={user.id}
@@ -639,7 +644,8 @@ const ChatPage = () => {
           {chats.length > 0 ? (
             chats.map(chat => (
               <div key={chat.id} className="relative group">
-                <Link to={`/chat/${chat.id}`} className="block">
+                {/* Al hacer clic en un chat, también ocultamos la lista en móvil */}
+                <Link to={`/chat/${chat.id}`} className="block" onClick={() => setShowChatList(false)}>
                   <motion.div
                     className={`p-4 flex items-center space-x-3 hover:bg-accent cursor-pointer border-b ${chatId === chat.id ? 'bg-accent' : ''}`}
                     whileHover={{ backgroundColor: "var(--accent)" }}
@@ -685,11 +691,25 @@ const ChatPage = () => {
       </aside>
 
       {/* Área de Mensajes */}
-      <main className="w-2/3 flex flex-col bg-background">
+      {/* Mostrar solo si hay un chat seleccionado O si la lista de chats está oculta (en móvil) */}
+      <main className={`flex-col md:flex w-full md:w-2/3 bg-background ${currentChat || !showChatList ? 'flex' : 'hidden'}`}>
         {currentChat ? (
           <>
             <header className="p-4 border-b flex justify-between items-center bg-muted/20">
               <div className="flex items-center space-x-3">
+                {/* Botón de volver en móvil */}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="md:hidden mr-2" // Ocultar en pantallas medianas y mayores
+                  onClick={() => {
+                    navigate('/chat'); // Volver a la ruta base de chat (lista)
+                    setShowChatList(true); // Mostrar la lista de chats
+                  }}
+                >
+                  <ArrowLeft className="h-5 w-5" />
+                </Button>
+
                 <Avatar className="h-10 w-10">
                   <AvatarImage src={currentChat.avatar_url || "https://images.unsplash.com/photo-1694388001616-1176f594d72f"} alt={currentChat.name} />
                   <AvatarFallback>{currentChat.name ? currentChat.name.substring(0, 1) : '?'}</AvatarFallback>
@@ -713,7 +733,7 @@ const ChatPage = () => {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.2 }}
                 >
-                  <div className={`max-w-xs lg:max-w-md p-3 rounded-xl shadow ${msg.sender === 'me' ? 'bg-primary text-primary-foreground' : 'bg-card text-card-foreground border'}`}>
+                  <div className={`max-w-[75%] md:max-w-xs lg:max-w-md p-3 rounded-xl shadow ${msg.sender === 'me' ? 'bg-primary text-primary-foreground' : 'bg-card text-card-foreground border'}`}>
                     <p className="text-sm">{msg.text}</p>
                     <p className={`text-xs mt-1 ${msg.sender === 'me' ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>{msg.time}</p>
                   </div>
