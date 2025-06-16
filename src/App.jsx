@@ -1,3 +1,4 @@
+// src/App.jsx
 import React from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { Toaster } from "@/components/ui/toaster";
@@ -10,7 +11,7 @@ import MainLayout from "@/layouts/MainLayout.jsx";
 // Pages
 import HomePage from "@/pages/HomePage.jsx";
 import RoomsPage from "@/pages/RoomsPage.jsx";
-import RoomDetailPage from "@/pages/RoomDetailPage.jsx";
+import RoomDetailPage from "@/pages/RoomDetailPage.jsx"; // Asegúrate de que este componente existe
 import FavoritesPage from "@/pages/FavoritesPage.jsx";
 import ProfilePage from "@/pages/ProfilePage.jsx";
 import CommunitiesPage from "@/pages/CommunitiesPage.jsx";
@@ -25,7 +26,7 @@ import LoginPage from "@/pages/LoginPage.jsx";
 import TermsPage from "@/pages/TermsPage.jsx";
 import MarketplacePage from "@/pages/MarketplacePage.jsx";
 import AdminDashboardPage from "@/pages/AdminDashboardPage.jsx";
-import AddRoomPage from "@/pages/AddRoomPage.jsx"; // <-- ¡CORREGIDO! Usamos AddRoomPage
+import AddRoomPage from "@/pages/AddRoomPage.jsx";
 import MyPropertiesPage from "@/pages/MyPropertiesPage.jsx";
 import EditRoomPage from "@/pages/EditRoomPage.jsx";
 
@@ -112,7 +113,10 @@ function AppContent() {
 
           {/* El resto de las rutas privadas sí deben asegurar que el onboarding esté completo */}
           <Route path="habitaciones" element={<PrivateRoute><RoomsPage /></PrivateRoute>} />
-          <Route path="habitacion/:id" element={<PrivateRoute><RoomDetailPage /></PrivateRoute>} />
+
+          {/* ¡CORRECCIÓN AQUÍ! Cambiado de "habitacion/:id" a "habitaciones/:id" para que coincida con el Link */}
+          <Route path="habitaciones/:id" element={<PrivateRoute><RoomDetailPage /></PrivateRoute>} />
+
           <Route path="favoritos" element={<PrivateRoute><FavoritesPage /></PrivateRoute>} />
           <Route path="perfil" element={<PrivateRoute><ProfilePage /></PrivateRoute>} />
           <Route path="perfil/:userId" element={<PrivateRoute><ProfilePage /></PrivateRoute>} />
@@ -123,11 +127,8 @@ function AppContent() {
           <Route path="chat" element={<PrivateRoute><ChatPage /></PrivateRoute>} />
           <Route path="chat/:chatId" element={<PrivateRoute><ChatPage /></PrivateRoute>} />
           <Route path="admin" element={<PrivateRoute><AdminDashboardPage /></PrivateRoute>} />
-          {/* Ruta para crear habitación */}
-          <Route path="crear-habitacion" element={<PrivateRoute><AddRoomPage /></PrivateRoute>} /> {/* ¡CORREGIDO! Usamos AddRoomPage */}
-          {/* Ruta para Mis Propiedades */}
+          <Route path="crear-habitacion" element={<PrivateRoute><AddRoomPage /></PrivateRoute>} />
           <Route path="mis-propiedades" element={<PrivateRoute><MyPropertiesPage /></PrivateRoute>} />
-          {/* Ruta para Editar Habitación (asumiendo que el componente EditRoomPage se creará) */}
           <Route path="editar-habitacion/:id" element={<PrivateRoute><EditRoomPage /></PrivateRoute>} />
 
           <Route path="reviews/property/:roomId" element={<PrivateRoute><div>Reviews for Room</div></PrivateRoute>} />
@@ -135,6 +136,7 @@ function AppContent() {
 
 
           {/* Ruta de fallback para 404 - Asegúrate de que esta esté al final */}
+          {/* Esta ruta de fallback navegará a la homepage si no se encuentra ninguna ruta */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

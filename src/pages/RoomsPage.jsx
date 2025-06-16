@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Search, Filter, PlusCircle, Loader2 } from "lucide-react"; // Añadimos Loader2
+import { Search, Filter, PlusCircle, Loader2 } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -10,8 +10,8 @@ import RoomCard from "@/components/rooms/RoomCard.jsx";
 import RoomFilters from "@/components/rooms/RoomFilters.jsx";
 import { fetchRooms } from "@/services/roomsService";
 import { useAuth } from "@/contexts/SupabaseAuthContext";
-import useFavorites from "@/hooks/useFavorites"; // Importamos el hook de favoritos
-import { Label } from "@/components/ui/label";
+import useFavorites from "@/hooks/useFavorites";
+import { Label } from "@/components/ui/label"; // Aunque no se usa directamente en este snippet, se mantiene por si es necesario en el futuro.
 
 const RoomsPage = () => {
   const location = useLocation();
@@ -19,9 +19,9 @@ const RoomsPage = () => {
   const queryParams = new URLSearchParams(location.search);
   const initialSearch = queryParams.get("q") || "";
 
-  const { user, loading: authLoading } = useAuth(); // Estado de carga de autenticación
+  const { user, loading: authLoading } = useAuth();
   const { toast } = useToast();
-  // Obtener funciones y estado del hook de favoritos
+
   const {
     favorites,
     loading: favoritesLoading,
@@ -32,7 +32,7 @@ const RoomsPage = () => {
 
   const [allRooms, setAllRooms] = useState([]);
   const [filteredRooms, setFilteredRooms] = useState([]);
-  const [loadingRooms, setLoadingRooms] = useState(true); // Renombrado para claridad
+  const [loadingRooms, setLoadingRooms] = useState(true);
   const [error, setError] = useState(null);
 
   const [searchTerm, setSearchTerm] = useState(initialSearch);
@@ -45,12 +45,12 @@ const RoomsPage = () => {
   const [showOnlyMine, setShowOnlyMine] = useState(false);
 
   const loadRooms = useCallback(async () => {
-    setLoadingRooms(true); // Usar el nuevo estado de carga para habitaciones
+    setLoadingRooms(true);
     setError(null);
     try {
-      // Asegúrate de que fetchRooms traiga el host_profile.id
-      // Por ejemplo, si tu fetchRooms hace un select('*') o un join con perfiles:
-      // const { data, error } = await supabase.from('rooms').select('*, host_profile:profiles(id, full_name, avatar_url)');
+      // Asegúrate de que fetchRooms trae la información del host, por ejemplo:
+      // en tu roomsService.js, la consulta de Supabase debería incluir algo como:
+      // .select('*, host_profile:profiles(id, full_name, avatar_url)')
       const data = await fetchRooms();
       setAllRooms(data);
     } catch (err) {
@@ -74,8 +74,8 @@ const RoomsPage = () => {
     let tempRooms = allRooms;
 
     if (showOnlyMine && user?.id) {
-      // Filtra por el ID del host del piso (asumiendo room.host_profile.id existe)
-      tempRooms = tempRooms.filter(room => room.host_profile?.id === user.id);
+      // Filtra por el ID del host del piso (asumiendo room.host_id o room.host_profile.id existe y se carga)
+      tempRooms = tempRooms.filter(room => room.host_id === user.id || room.host_profile?.id === user.id);
     }
 
     if (searchTerm) {
@@ -86,7 +86,6 @@ const RoomsPage = () => {
           (room.location?.toLowerCase().includes(kw) || "") ||
           (room.address?.toLowerCase().includes(kw) || "") ||
           (room.description?.toLowerCase().includes(kw) || "") ||
-          // También busca en las etiquetas de amenities (para búsqueda general de texto)
           (room.amenities || []).some(a => a.toLowerCase().includes(kw))
         )
       );
@@ -99,7 +98,9 @@ const RoomsPage = () => {
 
     if (selectedAmenities.length > 0) {
       tempRooms = tempRooms.filter(room => {
-        return selectedAmenities.every(amenityKey => room[amenityKey] === true);
+        // Asegurarse de que `room.amenities` sea un array para poder usar `includes`
+        const roomAmenities = Array.isArray(room.amenities) ? room.amenities : [];
+        return selectedAmenities.every(amenityKey => roomAmenities.includes(amenityKey));
       });
     }
 
@@ -132,7 +133,7 @@ const RoomsPage = () => {
     availableEndDate,
     showOnlyMine,
     allRooms,
-    user // Asegúrate de que user esté como dependencia si usas user.id para filtrar
+    user
   ]);
 
   const handleAmenityChange = (amenityId) => {
@@ -155,12 +156,15 @@ const RoomsPage = () => {
     });
   };
 
+  // ***** CAMBIO CLAVE AQUÍ *****
+  // Asegúrate de que esta URL coincida EXACTAMENTE con la ruta definida en App.jsx
   const handleRoomCardClick = (roomId) => {
-    navigate(`/habitacion/${roomId}`); // Asegúrate de que esta ruta sea correcta para tu página de detalles
+    navigate(`/habitaciones/${roomId}`); // ¡Ahora con "es" al final!
   };
+  // ******************************
 
   const handleAddRoomClick = () => {
-    navigate("/crear-habitacion"); // Asegúrate de que esta ruta sea correcta
+    navigate("/crear-habitacion");
   };
 
   const suggestedRooms = allRooms
@@ -170,7 +174,6 @@ const RoomsPage = () => {
     )
     .slice(0, 3);
 
-  // Unificamos los estados de carga
   if (loadingRooms || authLoading || favoritesLoading) {
     return (
       <div className="flex justify-center items-center min-h-screen">
@@ -217,7 +220,7 @@ const RoomsPage = () => {
         </div>
 
         <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-          {user && ( // Solo muestra "Añadir Habitación" si el usuario está logueado
+          {user && (
             <Button onClick={handleAddRoomClick} className="w-full sm:w-auto">
               <PlusCircle className="mr-2 h-4 w-4" /> Añadir Habitación
             </Button>
@@ -226,7 +229,7 @@ const RoomsPage = () => {
           <Button onClick={() => setShowFilters(!showFilters)} variant="outline" className="w-full sm:w-auto">
             <Filter className="mr-2 h-4 w-4" /> {showFilters ? "Ocultar Filtros" : "Mostrar Filtros"}
           </Button>
-          {user && ( // Solo muestra "Mis pisos/Todos" si el usuario está logueado
+          {user && (
             <Button
               onClick={() => setShowOnlyMine(prev => !prev)}
               variant={showOnlyMine ? "default" : "outline"}
@@ -261,10 +264,10 @@ const RoomsPage = () => {
               room={room}
               index={index}
               onRoomClick={handleRoomCardClick}
-              currentUser={user} // Pasamos el usuario actual
-              isRoomFavorite={isFavorite(room.id)} // Pasamos si esta habitación es favorita
-              onAddFavorite={addFavorite} // Pasamos la función para añadir a favoritos
-              onRemoveFavorite={removeFavorite} // Pasamos la función para eliminar de favoritos
+              currentUser={user}
+              isRoomFavorite={isFavorite(room.id)}
+              onAddFavorite={addFavorite}
+              onRemoveFavorite={removeFavorite}
             />
           ))}
         </motion.div>
@@ -284,10 +287,10 @@ const RoomsPage = () => {
                     room={room}
                     index={index}
                     onRoomClick={handleRoomCardClick}
-                    currentUser={user} // Pasamos el usuario actual
-                    isRoomFavorite={isFavorite(room.id)} // Pasamos si esta habitación es favorita
-                    onAddFavorite={addFavorite} // Pasamos la función para añadir a favoritos
-                    onRemoveFavorite={removeFavorite} // Pasamos la función para eliminar de favoritos
+                    currentUser={user}
+                    isRoomFavorite={isFavorite(room.id)}
+                    onAddFavorite={addFavorite}
+                    onRemoveFavorite={removeFavorite}
                   />
                 ))}
               </div>

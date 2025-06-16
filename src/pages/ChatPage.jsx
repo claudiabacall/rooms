@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Send, Smile, Search, MessageSquare, Trash2, ArrowLeft } from "lucide-react"; // Importar ArrowLeft
+import { Send, Smile, Search, MessageSquare, Trash2, ArrowLeft } from "lucide-react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 
 import { supabase } from '../supabaseClient';
@@ -476,26 +476,53 @@ const ChatPage = () => {
     }
 
     try {
-      // Intenta encontrar un chat directo existente entre los dos usuarios
-      const { data: existingChats, error: existingChatsError } = await supabase
-        .from('chats')
-        .select('id, chat_participants(profile_id)')
-        .eq('type', 'direct')
-        .contains('chat_participants.profile_id', [myProfileId, otherProfileId]); // Busca chats que contengan ambos IDs de perfil
+      // --- INICIO DE LA CORRECCIÓN CLAVE ---
+      // 1. Buscar en la tabla 'chat_participants' todas las entradas que involucran a cualquiera de los dos perfiles.
+      const { data: existingChatParticipants, error: existingChatParticipantsError } = await supabase
+        .from('chat_participants')
+        .select('chat_id, profile_id')
+        .in('profile_id', [myProfileId, otherProfileId]);
 
-      if (existingChatsError) throw existingChatsError;
+      if (existingChatParticipantsError) throw existingChatParticipantsError;
 
       let foundChatId = null;
-      if (existingChats && existingChats.length > 0) {
-        // Filtra para asegurar que el chat tiene EXACTAMENTE a estos dos participantes
-        for (const chat of existingChats) {
-          const participantIds = chat.chat_participants.map(p => p.profile_id);
-          if (participantIds.length === 2 && participantIds.includes(myProfileId) && participantIds.includes(otherProfileId)) {
-            foundChatId = chat.id;
-            break;
+      if (existingChatParticipants && existingChatParticipants.length > 0) {
+        // Agrupar los participantes encontrados por su 'chat_id' para verificar quién está en cada chat.
+        const chatsWithParticipants = existingChatParticipants.reduce((acc, current) => {
+          if (!acc[current.chat_id]) {
+            acc[current.chat_id] = [];
+          }
+          acc[current.chat_id].push(current.profile_id);
+          return acc;
+        }, {});
+
+        // Iterar sobre los chats agrupados para encontrar uno que contenga EXACTAMENTE a ambos perfiles
+        for (const chatIdToCheck in chatsWithParticipants) {
+          const participantsInChat = chatsWithParticipants[chatIdToCheck];
+
+          // Verificamos que el chat_id tiene exactamente 2 participantes
+          // Y que esos 2 participantes son myProfileId y otherProfileId.
+          // Esto asegura que es un chat directo entre ellos y no un grupo, etc.
+          if (participantsInChat.length === 2 &&
+            participantsInChat.includes(myProfileId) &&
+            participantsInChat.includes(otherProfileId)) {
+
+            // Finalmente, para estar seguros, confirmamos que el 'type' de este chat es 'direct'
+            // (esto es una capa adicional de seguridad, aunque la lógica anterior ya debería filtrar bien).
+            const { data: chatTypeData, error: chatTypeError } = await supabase
+              .from('chats')
+              .select('type')
+              .eq('id', chatIdToCheck)
+              .single();
+
+            if (!chatTypeError && chatTypeData?.type === 'direct') {
+              foundChatId = chatIdToCheck;
+              break; // Encontramos el chat, salimos del bucle
+            }
           }
         }
       }
+      // --- FIN DE LA CORRECCIÓN CLAVE ---
 
       if (foundChatId) {
         console.log("Chat existente encontrado:", foundChatId);
@@ -503,6 +530,7 @@ const ChatPage = () => {
         return;
       }
 
+      // Si no se encuentra un chat existente, crea uno nuevo
       const { data: newChat, error: newChatError } = await supabase
         .from('chats')
         .insert({ type: 'direct' })
@@ -648,6 +676,10 @@ const ChatPage = () => {
                 <Link to={`/chat/${chat.id}`} className="block" onClick={() => setShowChatList(false)}>
                   <motion.div
                     className={`p-4 flex items-center space-x-3 hover:bg-accent cursor-pointer border-b ${chatId === chat.id ? 'bg-accent' : ''}`}
+                    // ¡RECUERDA CORREGIR ESTO EN TU CSS!
+                    // Esta línea: `whileHover={{ backgroundColor: "var(--accent)" }}`
+                    // Es lo que causa la advertencia de CSS "Invalid keyframe value..." si var(--accent) no es un color válido.
+                    // Asegúrate de que `--accent` en tu archivo CSS sea algo como `hsl(220 67% 95%)` o un color HEX/RGB.
                     whileHover={{ backgroundColor: "var(--accent)" }}
                   >
                     <Avatar className="h-12 w-12">

@@ -1,11 +1,14 @@
 // src/services/roomsService.js
-import { supabase } from "../supabaseClient"; // Ruta relativa correcta para supabaseClient.js
+// La ruta es "../supabaseClient" porque supabaseClient.js está directamente en src/
+import { supabase } from "../supabaseClient";
 
 // Función auxiliar para mapear los datos de la DB a la estructura del frontend
 // Esto es CRUCIAL para que los nombres de las propiedades coincidan
 const mapRoomData = (room) => {
     if (!room) return null;
 
+    // Los campos average_rating y review_count se añadirán *después* de llamar a mapRoomData
+    // en la función fetchRooms, no vienen directamente del objeto 'room' aquí.
     return {
         id: room.id,
         title: room.title,
@@ -31,14 +34,13 @@ const mapRoomData = (room) => {
         imageUrl: room.image_urls && room.image_urls.length > 0 ? room.image_urls[0] : null,
         imageUrls: room.image_urls,
 
-        // MODIFICACIÓN CRUCIAL AQUÍ: Accede a host_profile tal como viene del alias de la consulta
         host_profile: room.host_profile ? {
-            id: room.host_profile.id, // ¡Asegúrate de incluir el ID del perfil!
+            id: room.host_profile.id,
             full_name: room.host_profile.full_name,
             avatar_url: room.host_profile.avatar_url,
-            age: room.host_profile.age,     // Añadido para que esté disponible en RoomDetailPage
-            gender: room.host_profile.gender, // Añadido para que esté disponible en RoomDetailPage
-            bio: room.host_profile.bio,     // Añadido para que esté disponible en RoomDetailPage
+            age: room.host_profile.age,
+            gender: room.host_profile.gender,
+            bio: room.host_profile.bio,
         } : null,
 
         // Genera el array de amenities a partir de los booleanos de la DB
@@ -55,7 +57,7 @@ const mapRoomData = (room) => {
     };
 };
 
-// Obtener todas las habitaciones
+// Obtener todas las habitaciones con sus anfitriones y calificaciones
 export const fetchRooms = async () => {
     try {
         const { data, error } = await supabase
@@ -69,7 +71,8 @@ export const fetchRooms = async () => {
                     age,
                     gender,
                     bio
-                )
+                ),
+                reviews(rating) // <<--- ¡IMPORTANTE! Aquí solicitamos los ratings de las reviews
             `)
             .order("created_at", { ascending: false });
 
@@ -77,14 +80,35 @@ export const fetchRooms = async () => {
             console.error("Error fetching rooms:", error);
             throw new Error(error.message);
         }
-        return data.map(mapRoomData);
+
+        // Mapeamos y calculamos las calificaciones para cada habitación
+        const roomsWithAggregates = data.map(room => {
+            // Calcular promedio y conteo de reseñas
+            const ratings = room.reviews ? room.reviews.map(r => r.rating) : [];
+            const totalRating = ratings.reduce((sum, r) => sum + (r || 0), 0);
+            const reviewCount = ratings.length;
+            const averageRating = reviewCount > 0 ? parseFloat((totalRating / reviewCount).toFixed(1)) : 0;
+
+            // Usamos mapRoomData para la estructura base y luego añadimos las propiedades de reseña
+            const mappedRoom = mapRoomData(room);
+
+            return {
+                ...mappedRoom,
+                average_rating: averageRating,
+                review_count: reviewCount,
+            };
+        });
+
+        return roomsWithAggregates;
+
     } catch (error) {
         console.error("Error en fetchRooms:", error);
         return [];
     }
 };
 
-// Obtener una habitación por ID
+// Obtener una habitación por ID (no trae las reseñas agregadas porque la página de detalle
+// las carga por separado si es necesario)
 export const fetchRoomById = async (roomId) => {
     try {
         const { data, error } = await supabase
@@ -107,7 +131,7 @@ export const fetchRoomById = async (roomId) => {
             console.error("Error fetching room by ID:", error);
             throw new Error(error.message);
         }
-        return mapRoomData(data);
+        return mapRoomData(data); // mapRoomData no necesita info de review para esta función
     } catch (error) {
         console.error("Error en fetchRoomById:", error);
         return null;
@@ -195,9 +219,7 @@ export const deleteRoom = async (roomId) => {
     }
 };
 
-// ******************************************************
-// AÑADIR LA FUNCIÓN 'updateRoom' AQUÍ ABAJO
-// ******************************************************
+// Función para actualizar una habitación
 export const updateRoom = async (roomId, hostId, roomData) => {
     try {
         // Validación de seguridad: Asegurarse de que el usuario que intenta actualizar

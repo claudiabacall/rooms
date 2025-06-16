@@ -2,12 +2,14 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { supabase } from "@/supabaseClient";
+import { supabase } from "@/supabaseClient"; // Asegúrate de que esta ruta sea correcta
 import { useAuth } from "@/contexts/SupabaseAuthContext.jsx";
 import { useToast } from "@/components/ui/use-toast";
 
-// Importa tu nuevo servicio de habitaciones
+// Importa tu servicio de habitaciones
 import { fetchRoomById } from "@/services/roomsService";
+// Importa tu nuevo servicio de reseñas
+import { submitReview, fetchReviewsByRoomId } from "@/services/reviewsService";
 
 // UI Components
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -15,6 +17,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea"; // Para el comentario de la reseña
+import { Input } from "@/components/ui/input"; // Aunque no lo usamos directamente para el rating, lo mantengo por si acaso
 
 // Icons
 import {
@@ -31,11 +35,17 @@ import {
     Fan,
     Tv,
     ParkingCircle,
-    Star,
+    Star, // Necesario para las estrellas de reseña
     MessageSquare,
     Edit,
     Trash2,
+    Loader2, // Para los spinners de carga
+    Send, // Para el botón de enviar reseña
 } from "lucide-react";
+
+// Utilidad para formato de fechas
+import { formatDistanceToNow } from 'date-fns';
+import { es } from 'date-fns/locale'; // Para fechas en español
 
 // Mapeo de propiedades booleanas a iconos de Lucide
 const featureIcons = {
@@ -49,17 +59,62 @@ const featureIcons = {
     has_parking: <ParkingCircle className="h-5 w-5 text-primary" />,
 };
 
+
+// Componente para una única reseña
+const ReviewCard = ({ review }) => {
+    const userProfile = review.user_profile;
+    const displayRating = review.rating || 0;
+    const initial = userProfile?.full_name ? userProfile.full_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() : 'UN';
+
+    return (
+        <div className="border rounded-lg p-4 mb-4 bg-card shadow-sm">
+            <div className="flex items-center mb-2">
+                <Avatar className="h-9 w-9 mr-3">
+                    {userProfile?.avatar_url
+                        ? <AvatarImage src={userProfile.avatar_url} alt={userProfile.full_name} />
+                        : <AvatarFallback>{initial}</AvatarFallback>
+                    }
+                </Avatar>
+                <div>
+                    <p className="font-semibold text-lg">{userProfile?.full_name || "Usuario Anónimo"}</p>
+                    <p className="text-sm text-muted-foreground">
+                        {review.created_at ? formatDistanceToNow(new Date(review.created_at), { addSuffix: true, locale: es }) : 'Fecha desconocida'}
+                    </p>
+                </div>
+            </div>
+            <div className="flex items-center mb-2">
+                {[...Array(5)].map((_, i) => (
+                    <Star
+                        key={i}
+                        className={`h-5 w-5 ${i < displayRating ? 'text-yellow-400 fill-yellow-400' : 'text-gray-300'}`}
+                    />
+                ))}
+                <span className="ml-2 text-sm text-muted-foreground">({displayRating} estrellas)</span>
+            </div>
+            <p className="text-foreground">{review.comment || "Sin comentario."}</p>
+        </div>
+    );
+};
+
+
 const RoomDetailPage = () => {
     const { id } = useParams();
     const navigate = useNavigate();
-    const { user: authUser } = useAuth();
+    const { user: authUser, loading: authLoading } = useAuth(); // Usar `authUser` para el usuario logueado
     const { toast } = useToast();
 
     const [room, setRoom] = useState(null);
     const [hostProfile, setHostProfile] = useState(null);
-    const [loading, setLoading] = useState(true);
+    const [loadingRoom, setLoadingRoom] = useState(true); // Cambiado a loadingRoom para diferenciar
     const [error, setError] = useState(null);
     const [isFavorited, setIsFavorited] = useState(false);
+
+    // NUEVOS ESTADOS PARA RESEÑAS
+    const [reviews, setReviews] = useState([]);
+    const [loadingReviews, setLoadingReviews] = useState(true);
+    const [newReviewRating, setNewReviewRating] = useState(0);
+    const [newReviewComment, setNewReviewComment] = useState("");
+    const [isSubmittingReview, setIsSubmittingReview] = useState(false);
 
     // TEMPORAL PARA DEPURACIÓN: Muestra el ID del usuario logueado al cambiar authUser
     useEffect(() => {
@@ -72,7 +127,7 @@ const RoomDetailPage = () => {
     // FIN TEMPORAL PARA DEPURACIÓN
 
     const fetchRoomDetails = useCallback(async () => {
-        setLoading(true);
+        setLoadingRoom(true); // Usar loadingRoom
         setError(null);
         try {
             const roomData = await fetchRoomById(id);
@@ -100,7 +155,7 @@ const RoomDetailPage = () => {
                     .eq("room_id", id)
                     .single();
 
-                if (favoriteError && favoriteError.code !== 'PGRST116') {
+                if (favoriteError && favoriteError.code !== 'PGRST116') { // PGRST116 es "no rows found"
                     throw favoriteError;
                 }
                 setIsFavorited(!!favoriteData);
@@ -115,13 +170,87 @@ const RoomDetailPage = () => {
                 variant: "destructive",
             });
         } finally {
-            setLoading(false);
+            setLoadingRoom(false); // Usar loadingRoom
         }
     }, [id, authUser, navigate, toast]);
 
+    // NUEVA FUNCIÓN: Cargar reseñas para la habitación
+    const loadReviews = useCallback(async () => {
+        setLoadingReviews(true);
+        try {
+            const data = await fetchReviewsByRoomId(id);
+            setReviews(data);
+        } catch (err) {
+            console.error("Error loading reviews:", err);
+            toast({
+                title: "Error al cargar reseñas",
+                description: err.message || "No se pudieron cargar las reseñas para esta habitación.",
+                variant: "destructive",
+            });
+        } finally {
+            setLoadingReviews(false);
+        }
+    }, [id, toast]);
+
+    // UseEffect para cargar la habitación y las reseñas
     useEffect(() => {
-        fetchRoomDetails();
-    }, [fetchRoomDetails]);
+        if (id) {
+            fetchRoomDetails();
+            loadReviews(); // Llama a la función para cargar reseñas
+        }
+    }, [id, fetchRoomDetails, loadReviews]); // Añade loadReviews como dependencia
+
+    // Función para manejar el envío de una nueva reseña
+    const handleSubmitReview = async (e) => {
+        e.preventDefault();
+        if (!authUser) {
+            toast({
+                title: "Acceso denegado",
+                description: "Debes iniciar sesión para enviar una reseña.",
+                variant: "destructive",
+            });
+            return;
+        }
+        if (newReviewRating === 0) {
+            toast({
+                title: "Calificación requerida",
+                description: "Por favor, selecciona una calificación en estrellas.",
+                variant: "warning",
+            });
+            return;
+        }
+
+        setIsSubmittingReview(true);
+        try {
+            await submitReview(id, newReviewRating, newReviewComment);
+            toast({
+                title: "Reseña enviada",
+                description: "Tu reseña ha sido publicada con éxito.",
+            });
+            setNewReviewRating(0); // Resetear el formulario
+            setNewReviewComment("");
+            loadReviews(); // Recargar las reseñas para mostrar la nueva
+        } catch (err) {
+            console.error("Error submitting review:", err);
+            toast({
+                title: "Error al enviar reseña",
+                description: err.message || "Hubo un problema al enviar tu reseña.",
+                variant: "destructive",
+            });
+        } finally {
+            setIsSubmittingReview(false);
+        }
+    };
+
+    // Cálculo de la calificación promedio
+    const calculateAverageRating = useCallback(() => {
+        if (reviews.length === 0) return { average: 0, count: 0 };
+        const totalRating = reviews.reduce((sum, review) => sum + (review.rating || 0), 0);
+        const average = totalRating / reviews.length;
+        return { average: parseFloat(average.toFixed(1)), count: reviews.length };
+    }, [reviews]);
+
+    const { average: overallAverageRating, count: reviewCount } = calculateAverageRating();
 
     const handleFavoriteToggle = async () => {
         if (!authUser) {
@@ -168,7 +297,7 @@ const RoomDetailPage = () => {
         if (!window.confirm("¿Estás seguro de que quieres eliminar esta habitación? Esta acción no se puede deshacer.")) {
             return;
         }
-        setLoading(true);
+        setLoadingRoom(true); // Usar loadingRoom
         try {
             // Eliminar favoritos asociados a la habitación primero
             const { error: deleteFavoritesError } = await supabase
@@ -203,14 +332,15 @@ const RoomDetailPage = () => {
                 variant: "destructive",
             });
         } finally {
-            setLoading(false);
+            setLoadingRoom(false); // Usar loadingRoom
         }
     };
 
-    if (loading) {
+    if (loadingRoom || authLoading) { // Añadido authLoading aquí
         return (
-            <div className="container mx-auto py-12 text-center">
-                Cargando detalles de la habitación...
+            <div className="flex justify-center items-center min-h-screen">
+                <Loader2 className="h-8 w-8 animate-spin text-gray-500" />
+                <p className="ml-2 text-gray-600">Cargando detalles de la habitación...</p>
             </div>
         );
     }
@@ -359,13 +489,92 @@ const RoomDetailPage = () => {
                             </div>
                         </CardContent>
                     </Card>
+
+                    {/* Sección de Reseñas */}
+                    <section className="mt-8">
+                        <h2 className="text-2xl font-semibold mb-4 flex items-center">
+                            Reseñas ({reviewCount})
+                            <span className="ml-3 flex items-center text-yellow-500">
+                                {overallAverageRating > 0 ? (
+                                    <>
+                                        {overallAverageRating} <Star className="h-5 w-5 fill-yellow-500 ml-1" />
+                                    </>
+                                ) : (
+                                    <span className="text-muted-foreground text-sm ml-2">Sé el primero en reseñar</span>
+                                )}
+                            </span>
+                        </h2>
+
+                        {/* Formulario para añadir nueva reseña */}
+                        {authUser ? ( // Solo mostrar el formulario si el usuario está logueado (authUser)
+                            <form onSubmit={handleSubmitReview} className="bg-card p-6 rounded-lg shadow-md mb-8">
+                                <h3 className="text-xl font-semibold mb-4">Escribe tu reseña</h3>
+                                <div className="mb-4">
+                                    <label htmlFor="rating" className="block text-sm font-medium text-foreground mb-2">
+                                        Tu Calificación
+                                    </label>
+                                    <div className="flex items-center">
+                                        {[...Array(5)].map((_, i) => (
+                                            <Star
+                                                key={i}
+                                                className={`h-7 w-7 cursor-pointer ${i < newReviewRating ? 'text-yellow-400 fill-yellow-400' : 'text-gray-300'}`}
+                                                onClick={() => setNewReviewRating(i + 1)}
+                                            />
+                                        ))}
+                                        <span className="ml-3 text-lg font-medium">{newReviewRating} / 5</span>
+                                    </div>
+                                </div>
+                                <div className="mb-4">
+                                    <label htmlFor="comment" className="block text-sm font-medium text-foreground mb-2">
+                                        Comentario (opcional)
+                                    </label>
+                                    <Textarea
+                                        id="comment"
+                                        placeholder="Comparte tu experiencia..."
+                                        value={newReviewComment}
+                                        onChange={(e) => setNewReviewComment(e.target.value)}
+                                        rows="4"
+                                    />
+                                </div>
+                                <Button type="submit" disabled={isSubmittingReview}>
+                                    {isSubmittingReview ? (
+                                        <>
+                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Enviando...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Send className="mr-2 h-4 w-4" /> Enviar Reseña
+                                        </>
+                                    )}
+                                </Button>
+                            </form>
+                        ) : (
+                            <p className="text-muted-foreground text-center p-4 border rounded-lg mb-8">
+                                <Link to="/login" className="text-primary hover:underline">Inicia sesión</Link> para dejar una reseña.
+                            </p>
+                        )}
+
+                        {/* Lista de reseñas */}
+                        {loadingReviews ? (
+                            <div className="flex justify-center items-center py-8">
+                                <Loader2 className="h-6 w-6 animate-spin text-gray-500" />
+                                <p className="ml-2 text-gray-600">Cargando reseñas...</p>
+                            </div>
+                        ) : reviews.length > 0 ? (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                {reviews.map((review) => (
+                                    <ReviewCard key={review.id} review={review} />
+                                ))}
+                            </div>
+                        ) : (
+                            <p className="text-muted-foreground text-center py-8">Aún no hay reseñas para esta habitación.</p>
+                        )}
+                    </section>
                 </div>
 
                 {/* Sidebar - Info del Anfitrión y Acciones */}
-                {/* Este div es el que ahora tiene la posición fija */}
                 <div className="lg:fixed lg:top-24 lg:right-4 lg:w-[calc(33.33%-2rem)] lg:max-w-[400px] space-y-8">
-                    {/* Eliminado el padding horizontal de la tarjeta ya que lo maneja el contenedor fijo */}
-                    {isHost ? ( // SI EL USUARIO AUTENTICADO ES EL ANFITRIÓN
+                    {isHost ? (
                         <Card className="shadow-lg rounded-xl text-center p-6">
                             <CardTitle className="text-2xl font-bold text-gray-900 mb-4">
                                 Gestionar tu Propiedad
@@ -387,9 +596,9 @@ const RoomDetailPage = () => {
                                 </Button>
                             </div>
                         </Card>
-                    ) : ( // SI EL USUARIO NO ES EL ANFITRIÓN (o no hay usuario logueado)
+                    ) : (
                         <>
-                            {hostProfile && ( // Asegura que hostProfile exista antes de renderizar la tarjeta del anfitrión
+                            {hostProfile && (
                                 <Card className="shadow-lg rounded-xl text-center p-6">
                                     <Link to={`/perfil/${hostProfile.id}`} className="block">
                                         <Avatar className="h-28 w-28 mx-auto mb-4 border-4 border-primary shadow-lg">
@@ -411,7 +620,6 @@ const RoomDetailPage = () => {
                                     <p className="text-muted-foreground italic mb-4">
                                         {hostProfile.bio || "Este anfitrión aún no ha añadido una biografía."}
                                     </p>
-                                    {/* Botones de interacción para no-anfitriones */}
                                     <div className="space-y-3">
                                         <Button
                                             onClick={handleFavoriteToggle}
@@ -441,7 +649,6 @@ const RoomDetailPage = () => {
                                 </Card>
                             )}
 
-                            {/* Tarjeta de "Interesado en esta habitación?" (Solo si NO es el anfitrión) */}
                             <Card className="shadow-lg rounded-xl">
                                 <CardHeader>
                                     <CardTitle>Interesado en esta habitación?</CardTitle>

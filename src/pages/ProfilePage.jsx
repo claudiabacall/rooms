@@ -1,3 +1,4 @@
+// src/pages/ProfilePage.jsx
 import React, { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import { useToast } from "@/components/ui/use-toast";
@@ -6,15 +7,26 @@ import { useAuth } from "@/contexts/SupabaseAuthContext.jsx";
 import { supabase } from "@/supabaseClient";
 import ProfileForm from "@/components/profile/ProfileForm.jsx";
 
-import { User, Shield, Star, Pencil, Home, Users, PlusCircle } from "lucide-react"; // Importa 'Users' y 'PlusCircle'
+// Componentes de UI
+import { User, Shield, Star, Pencil, Home, Users, PlusCircle } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
+// Componentes personalizados
 import ProfileCard from "@/components/profile/ProfileCard.jsx";
 import SecuritySettings from "@/components/profile/SecuritySettings.jsx";
 import NotificationSettings from "@/components/profile/NotificationSettings.jsx";
+
+// Librerías de terceros
+import ReactStars from 'react-rating-stars-component';
+
+// Funciones de API
+import { fetchUserReviews, fetchUserRatingSummary, submitReview } from '../api/reviews';
+import { lifestyleQuestions } from "@/lib/lifestyleQuestions"; // Asegúrate de que esta ruta sea correcta
 
 // Helper function to map Supabase snake_case data to camelCase for React components
 const mapSupabaseProfileToFormData = (data, authUser) => {
@@ -47,6 +59,7 @@ const mapSupabaseProfileToFormData = (data, authUser) => {
 // Helper function to map React formData to Supabase snake_case data
 const mapFormDataToSupabaseProfile = (formData) => {
   return {
+    full_name: formData.fullName, // Añadir full_name para actualizar en auth.users
     age: formData.age ? parseInt(formData.age, 10) : null,
     gender: formData.gender,
     phone_number: formData.phone_number,
@@ -78,12 +91,26 @@ const ProfilePage = () => {
   const [pageLoading, setPageLoading] = useState(true);
   const [error, setError] = useState(null);
   const [userProperties, setUserProperties] = useState([]);
-  const [userMemberCommunities, setUserMemberCommunities] = useState([]); // RENOMBRADO: Comunidades donde es miembro
-  const [userOwnedCommunities, setUserOwnedCommunities] = useState([]); // NUEVO ESTADO: Comunidades creadas por el usuario
+  const [userMemberCommunities, setUserMemberCommunities] = useState([]);
+  const [userOwnedCommunities, setUserOwnedCommunities] = useState([]);
+
+  // Estados para las reseñas
+  const [reviews, setReviews] = useState([]);
+  const [ratingSummary, setRatingSummary] = useState({ average_rating: 0, total_reviews: 0 });
+  const [showReviewForm, setShowReviewForm] = useState(false);
+  const [newReviewRating, setNewReviewRating] = useState(0);
+  const [newReviewText, setNewReviewText] = useState('');
+  const [isSubmittingReview, setIsSubmittingReview] = useState(false);
+  const [submitReviewError, setSubmitReviewError] = useState('');
+
 
   const targetProfileId = userId || authUser?.id;
 
-  // --- Fetch Profile Data ---
+  // Renombrar authUser a currentUser para consistencia con el código de reseñas
+  const currentUser = authUser;
+  const profileId = targetProfileId;
+
+  // --- Fetch Profile Data, Reviews & Rating Summary ---
   useEffect(() => {
     if (authLoading) {
       return;
@@ -99,11 +126,12 @@ const ProfilePage = () => {
       return;
     }
 
-    const fetchProfile = async () => {
+    const fetchAllProfileData = async () => {
       setPageLoading(true);
       setError(null);
       try {
-        const { data, error: fetchError } = await supabase
+        // Fetch profile details
+        const { data: fetchedProfileData, error: fetchError } = await supabase
           .from("profiles")
           .select("*")
           .eq("id", targetProfileId)
@@ -113,17 +141,29 @@ const ProfilePage = () => {
           throw fetchError;
         }
 
-        if (!data) {
+        if (!fetchedProfileData) {
           setError("Perfil no encontrado.");
           toast({ title: "Perfil no encontrado", description: "No se pudo cargar el perfil.", variant: "destructive" });
           navigate('/404', { replace: true });
           return;
         }
 
-        const mappedData = mapSupabaseProfileToFormData(data, authUser);
+        const mappedData = mapSupabaseProfileToFormData(fetchedProfileData, authUser);
         setProfileData(mappedData);
         setFormDataForForm(mappedData);
         setIsOwnProfile(targetProfileId === authUser?.id);
+
+        // Fetch rating summary (average and total reviews)
+        const summary = await fetchUserRatingSummary(targetProfileId);
+        if (summary) {
+          setRatingSummary(summary);
+        } else {
+          setRatingSummary({ average_rating: 0, total_reviews: 0 });
+        }
+
+        // Fetch individual reviews
+        const fetchedReviews = await fetchUserReviews(targetProfileId);
+        setReviews(fetchedReviews);
 
       } catch (err) {
         console.error("Error fetching profile:", err);
@@ -133,7 +173,7 @@ const ProfilePage = () => {
           description: err.message || "Inténtalo de nuevo más tarde.",
           variant: "destructive",
         });
-        if (err.code === 'PGRST116') {
+        if (err.code === 'PGRST116') { // Error code for no rows found
           navigate('/404', { replace: true });
         }
       } finally {
@@ -141,7 +181,7 @@ const ProfilePage = () => {
       }
     };
 
-    fetchProfile();
+    fetchAllProfileData();
   }, [targetProfileId, authUser, toast, navigate, authLoading]);
 
   // --- Fetch User's Properties (Rooms) ---
@@ -172,7 +212,7 @@ const ProfilePage = () => {
     fetchUserProperties();
   }, [profileData, isEditing, toast]);
 
-  // --- RENOMBRADO useEffect: Fetch User's Member Communities ---
+  // --- Fetch User's Member Communities ---
   useEffect(() => {
     const fetchUserMemberCommunities = async () => {
       if (!profileData?.id || isEditing) return;
@@ -196,7 +236,8 @@ const ProfilePage = () => {
         }
 
         setUserMemberCommunities(data.map(item => item.communities).filter(Boolean) || []);
-      } catch (err) {
+      }
+      catch (err) {
         console.error("Error fetching user member communities:", err);
         toast({
           title: "Error al cargar comunidades de miembro",
@@ -209,7 +250,7 @@ const ProfilePage = () => {
     fetchUserMemberCommunities();
   }, [profileData, isEditing, toast]);
 
-  // --- NUEVO useEffect: Fetch User's Owned Communities ---
+  // --- Fetch User's Owned Communities ---
   useEffect(() => {
     const fetchUserOwnedCommunities = async () => {
       if (!profileData?.id || isEditing) return;
@@ -223,15 +264,16 @@ const ProfilePage = () => {
             description,
             image_url
           `)
-          .eq("owner_id", profileData.id) // Filtra por el owner_id del perfil actual
-          .order("created_at", { ascending: false }); // Opcional: ordenar por fecha de creación
+          .eq("owner_id", profileData.id)
+          .order("created_at", { ascending: false });
 
         if (ownedCommunitiesError) {
           throw ownedCommunitiesError;
         }
 
         setUserOwnedCommunities(data || []);
-      } catch (err) {
+      }
+      catch (err) {
         console.error("Error fetching user owned communities:", err);
         toast({
           title: "Error al cargar comunidades creadas",
@@ -252,12 +294,29 @@ const ProfilePage = () => {
     try {
       const profileUpdates = mapFormDataToSupabaseProfile(updatedFormData);
 
-      const authMetadataUpdates = {
-        full_name: updatedFormData.fullName,
-      };
+      // Update auth.users metadata for full_name
+      const { error: authUpdateError } = await supabase.auth.updateUser({
+        data: {
+          full_name: updatedFormData.fullName,
+        },
+      });
 
-      await updateProfile(profileUpdates, authMetadataUpdates);
+      if (authUpdateError) {
+        throw authUpdateError;
+      }
 
+      // Update profiles table
+      const { error: profileUpdateError } = await supabase
+        .from('profiles')
+        .update(profileUpdates)
+        .eq('id', targetProfileId);
+
+      if (profileUpdateError) {
+        throw profileUpdateError;
+      }
+
+
+      // Refetch latest profile data to ensure UI is in sync
       const { data: latestProfileData, error: latestProfileError } = await supabase
         .from("profiles")
         .select("*")
@@ -294,6 +353,47 @@ const ProfilePage = () => {
     }
   }, [profileData]);
 
+  // --- Handle Review Submission ---
+  const handleReviewSubmit = async (e) => {
+    e.preventDefault();
+    setSubmitReviewError('');
+    if (!currentUser) {
+      setSubmitReviewError('Debes iniciar sesión para dejar una reseña.');
+      return;
+    }
+    if (newReviewRating === 0) {
+      setSubmitReviewError('Por favor, selecciona una puntuación.');
+      return;
+    }
+    if (currentUser.id === profileId) {
+      setSubmitReviewError('No puedes dejar una reseña sobre ti mismo.');
+      return;
+    }
+
+    setIsSubmittingReview(true);
+    try {
+      await submitReview(currentUser.id, profileId, newReviewRating, newReviewText);
+      // Actualizar las reseñas y el resumen después de enviar
+      const updatedReviews = await fetchUserReviews(profileId);
+      setReviews(updatedReviews);
+      const updatedSummary = await fetchUserRatingSummary(profileId);
+      if (updatedSummary) {
+        setRatingSummary(updatedSummary);
+      } else {
+        setRatingSummary({ average_rating: 0, total_reviews: 0 });
+      }
+      setNewReviewRating(0);
+      setNewReviewText('');
+      setShowReviewForm(false); // Ocultar el formulario
+      toast({ title: "Reseña enviada", description: "Gracias por tu opinión.", variant: "success" });
+    } catch (error) {
+      setSubmitReviewError(error.message);
+      toast({ title: "Error al enviar reseña", description: error.message, variant: "destructive" });
+    } finally {
+      setIsSubmittingReview(false);
+    }
+  };
+
 
   // --- Render Loading/Error states ---
   if (authLoading || (pageLoading && !profileData)) {
@@ -323,6 +423,7 @@ const ProfilePage = () => {
     );
   }
 
+
   return (
     <div className="container mx-auto px-4 py-8">
       <motion.div
@@ -330,9 +431,18 @@ const ProfilePage = () => {
         animate={{ opacity: 1, y: 0 }}
         className="mb-6 flex items-center justify-between"
       >
-        <h1 className="text-4xl font-bold text-primary">
-          {isOwnProfile ? `¡Hola, ${profileData.fullName?.split(" ")[0] || authUser?.email?.split('@')[0]}!` : `Perfil de ${profileData.fullName}`}
-        </h1>
+        {/*
+          Modificación aquí:
+          El <h1> solo se muestra si es el perfil propio (isOwnProfile es true).
+          Si no es el perfil propio, el <h1> no se renderiza.
+        */}
+        {isOwnProfile && (
+          <h1 className="text-3xl sm:text-4xl font-bold text-primary">
+            ¡Hola, {profileData.fullName?.split(" ")[0] || authUser?.email?.split('@')[0]}!
+          </h1>
+        )}
+
+        {/* El botón de editar perfil solo se muestra si es el perfil propio */}
         {isOwnProfile && (
           <Button onClick={() => setIsEditing(!isEditing)} variant="outline" className="gap-2">
             <Pencil className="h-4 w-4" /> {isEditing ? 'Ver perfil' : 'Editar perfil'}
@@ -347,6 +457,7 @@ const ProfilePage = () => {
               userProfile={profileData}
               isOwnProfile={isOwnProfile}
               onReportUser={!isOwnProfile ? () => toast({ title: "Usuario reportado", description: "El usuario ha sido reportado.", variant: "destructive" }) : undefined}
+              ratingSummary={ratingSummary}
             />
           </div>
         </div>
@@ -423,6 +534,7 @@ const ProfilePage = () => {
                       {userProperties.length > 0 ? (
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           {userProperties.map(property => (
+                            // ENLACE A LA PÁGINA DE LA PROPIEDAD
                             <Link to={`/habitaciones/${property.id}`} key={property.id} className="block">
                               <Card className="border border-muted p-4 shadow-sm rounded-xl bg-background hover:bg-muted/60 transition-colors">
                                 <h4 className="font-semibold text-foreground mb-1 flex items-center">
@@ -450,10 +562,11 @@ const ProfilePage = () => {
                       {userOwnedCommunities.length > 0 ? (
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           {userOwnedCommunities.map(community => (
+                            // ENLACE A LA PÁGINA DE LA COMUNIDAD
                             <Link to={`/comunidades/${community.id}`} key={community.id} className="block">
                               <Card className="border border-muted p-4 shadow-sm rounded-xl bg-background hover:bg-muted/60 transition-colors">
                                 <h4 className="font-semibold text-foreground mb-1 flex items-center">
-                                  <PlusCircle className="h-4 w-4 mr-2 text-primary" /> {/* Icono para comunidades creadas */}
+                                  <PlusCircle className="h-4 w-4 mr-2 text-primary" />
                                   {community.name}
                                 </h4>
                                 {community.image_url && (
@@ -471,17 +584,18 @@ const ProfilePage = () => {
                   </Card>
 
 
-                  {/* Comunidades a las que es miembro (anteriormente "Mis comunidades") */}
+                  {/* Comunidades a las que es miembro */}
                   <Card className="bg-muted/40 shadow-md rounded-2xl">
                     <CardHeader><CardTitle>Miembro de comunidades</CardTitle></CardHeader>
                     <CardContent>
                       {userMemberCommunities.length > 0 ? (
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           {userMemberCommunities.map(community => (
+                            // ENLACE A LA PÁGINA DE LA COMUNIDAD
                             <Link to={`/comunidades/${community.id}`} key={community.id} className="block">
                               <Card className="border border-muted p-4 shadow-sm rounded-xl bg-background hover:bg-muted/60 transition-colors">
                                 <h4 className="font-semibold text-foreground mb-1 flex items-center">
-                                  <Users className="h-4 w-4 mr-2 text-primary" /> {/* Icono para comunidades de miembro */}
+                                  <Users className="h-4 w-4 mr-2 text-primary" />
                                   {community.name}
                                 </h4>
                                 {community.image_url && (
@@ -502,9 +616,79 @@ const ProfilePage = () => {
 
               <TabsContent value="reviews">
                 <Card>
-                  <CardHeader><CardTitle>Reseñas</CardTitle></CardHeader>
+                  <CardHeader>
+                    <CardTitle>Reseñas</CardTitle>
+                  </CardHeader>
                   <CardContent>
-                    <p className="text-muted-foreground">Aquí aparecerán las reseñas del usuario.</p>
+                    {!isOwnProfile && currentUser && (
+                      <Button onClick={() => setShowReviewForm(!showReviewForm)} className="mb-4">
+                        {showReviewForm ? 'Cancelar reseña' : 'Dejar una reseña'}
+                      </Button>
+                    )}
+
+                    {showReviewForm && !isOwnProfile && currentUser && (
+                      <Card className="mb-4 p-4">
+                        <CardTitle className="text-xl mb-3">Tu reseña</CardTitle>
+                        <form onSubmit={handleReviewSubmit} className="space-y-4">
+                          <div className="flex items-center gap-2">
+                            <span className="text-md">Puntuación:</span>
+                            <ReactStars
+                              count={5}
+                              onChange={(newRating) => setNewReviewRating(newRating)}
+                              value={newReviewRating}
+                              size={24}
+                              activeColor="#ffd700"
+                              isHalf={true}
+                            />
+                          </div>
+                          <Textarea
+                            placeholder="Escribe tu reseña aquí..."
+                            value={newReviewText}
+                            onChange={(e) => setNewReviewText(e.target.value)}
+                            rows={4}
+                          />
+                          {submitReviewError && <p className="text-red-500 text-sm">{submitReviewError}</p>}
+                          <Button type="submit" disabled={isSubmittingReview}>
+                            {isSubmittingReview ? 'Enviando...' : 'Enviar Reseña'}
+                          </Button>
+                        </form>
+                      </Card>
+                    )}
+
+                    <h3 className="text-xl font-semibold mt-6 mb-4">Todas las reseñas recibidas ({reviews.length})</h3>
+                    {reviews.length === 0 ? (
+                      <p className="text-muted-foreground">Todavía no hay reseñas para este usuario.</p>
+                    ) : (
+                      <div className="space-y-4">
+                        {reviews.map((review) => (
+                          <Card key={review.id} className="p-4">
+                            <div className="flex items-center gap-3 mb-2">
+                              <Avatar className="h-10 w-10">
+                                <AvatarImage src={review.reviewer?.avatar_url || 'https://via.placeholder.com/50'} alt={review.reviewer?.full_name} />
+                                <AvatarFallback>{review.reviewer?.full_name?.charAt(0).toUpperCase() || '?'}</AvatarFallback>
+                              </Avatar>
+                              <div>
+                                <p className="font-semibold">{review.reviewer?.full_name || 'Usuario desconocido'}</p>
+                                <div className="flex items-center">
+                                  <ReactStars
+                                    count={5}
+                                    value={review.rating}
+                                    size={18}
+                                    activeColor="#ffd700"
+                                    edit={false}
+                                    isHalf={true}
+                                  />
+                                  <span className="ml-2 text-sm text-muted-foreground">
+                                    {new Date(review.created_at).toLocaleDateString('es-ES')}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                            <p className="text-sm text-foreground">{review.review_text || 'No hay texto de reseña.'}</p>
+                          </Card>
+                        ))}
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               </TabsContent>

@@ -1,4 +1,4 @@
-// src/hooks/useCommunityDetails.js
+// src/hooks/useCommunityDetails.jsx
 import { useState, useEffect, useCallback } from "react";
 import { useParams } from "react-router-dom";
 import { supabase } from "@/supabaseClient";
@@ -133,7 +133,7 @@ const useCommunityDetails = () => {
                 .from('community_posts')
                 .select(`
                     *,
-                    profiles (full_name, avatar_url)
+                    profiles (id, full_name, avatar_url)
                 `)
                 .eq('community_id', communityId)
                 .order('created_at', { ascending: false });
@@ -199,7 +199,7 @@ const useCommunityDetails = () => {
                         if (payload.eventType === 'INSERT') {
                             supabase
                                 .from('profiles')
-                                .select('full_name, avatar_url')
+                                .select('id, full_name, avatar_url')
                                 .eq('id', payload.new.author_id)
                                 .single()
                                 .then(({ data: profileData, error: profileError }) => {
@@ -224,7 +224,7 @@ const useCommunityDetails = () => {
                         } else if (payload.eventType === 'UPDATE') {
                             supabase
                                 .from('profiles')
-                                .select('full_name, avatar_url')
+                                .select('id, full_name, avatar_url')
                                 .eq('id', payload.new.author_id)
                                 .single()
                                 .then(({ data: profileData, error: profileError }) => {
@@ -514,9 +514,9 @@ const useCommunityDetails = () => {
         } finally {
             setIsDeletingCommunity(false);
         }
-    }, [community, isOwner, user, toast]);
+    }, [community, isOwner, user, toast]); // <-- ¡Aquí cierra el useCallback de deleteCommunity!
 
-
+    // <-- ¡Aquí termina la función useCommunityDetails!
     return {
         community,
         posts,
