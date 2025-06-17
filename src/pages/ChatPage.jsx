@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { motion } from "framer-motion";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Send, Smile, Search, MessageSquare, Trash2, ArrowLeft } from "lucide-react";
-import { useParams, Link, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, Link } from "react-router-dom";
+import { supabase } from '../supabaseClient'; // Asegúrate de que esta ruta sea correcta
 
-import { supabase } from '../supabaseClient';
+// Importa los componentes modulares
+import ChatListSidebar from "@/components/chat/ChatListSidebar";
+import ChatHeader from "@/components/chat/ChatHeader";
+import ChatMessageArea from "@/components/chat/ChatMessageArea";
+import ChatInput from "@/components/chat/ChatInput";
+import ChatWelcomeScreen from "@/components/chat/ChatWelcomeScreen";
+// Importa EmojiPicker directamente si no es un componente de tu UI library
 import EmojiPicker from 'emoji-picker-react';
 
 const ChatPage = () => {
@@ -20,6 +22,7 @@ const ChatPage = () => {
   const chatSubscriptionRef = useRef(null);
   const presenceChannelRef = useRef(null);
   const chatParticipantsSubscriptionRef = useRef(null);
+  const chatsSubscriptionRef = useRef(null); // Nueva referencia para la suscripción de chats
   const [onlineUsers, setOnlineUsers] = useState(new Set());
   const navigate = useNavigate();
 
@@ -35,12 +38,20 @@ const ChatPage = () => {
 
   // Determinar si estamos en vista de chat activo en móvil
   useEffect(() => {
-    // Si hay un chatId en la URL, y la pantalla es pequeña, ocultar la lista de chats
-    if (chatId) {
-      setShowChatList(false);
-    } else {
-      setShowChatList(true);
-    }
+    const handleMobileView = () => {
+      // Definimos un breakpoint 'md' de 768px para Tailwind por defecto
+      const isMobile = window.innerWidth < 768;
+      if (chatId && isMobile) {
+        setShowChatList(false); // Si hay un chat ID y es móvil, ocultar la lista
+      } else {
+        setShowChatList(true); // En cualquier otro caso, mostrar la lista
+      }
+    };
+
+    handleMobileView(); // Ejecutar al montar
+
+    window.addEventListener('resize', handleMobileView); // Añadir listener para redimensionamiento
+    return () => window.removeEventListener('resize', handleMobileView); // Limpiar listener
   }, [chatId]);
 
 
@@ -58,9 +69,12 @@ const ChatPage = () => {
   }, [navigate]);
 
   const fetchUserChats = useCallback(async () => {
-    if (!myProfileId) return;
+    if (!myProfileId) {
+      console.log("FetchUserChats: myProfileId no disponible, saltando.");
+      return;
+    }
 
-    console.log("Fetching user chats...");
+    console.log("FetchUserChats: Iniciando la carga de chats para el perfil:", myProfileId);
     try {
       const { data: participations, error: participationsError } = await supabase
         .from('chat_participants')
@@ -68,7 +82,7 @@ const ChatPage = () => {
         .eq('profile_id', myProfileId);
 
       if (participationsError) throw participationsError;
-      console.log("Participations fetched:", participations);
+      console.log("FetchUserChats: Participations fetched:", participations);
 
       const chatListPromises = participations.map(async (p) => {
         const chatData = p.chats;
@@ -89,14 +103,14 @@ const ChatPage = () => {
             chatName = otherParticipants[0].profiles?.full_name || 'Usuario desconocido';
             otherParticipantId = otherParticipants[0].profile_id;
             avatar_url = otherParticipants[0].profiles?.avatar_url;
-            console.log(`Chat ${chatData.id} is direct. Name: ${chatName}, Other ID: ${otherParticipantId}`);
+            // console.log(`Chat ${chatData.id} is direct. Name: ${chatName}, Other ID: ${otherParticipantId}`); // Demasiado verboso
           } else {
             console.warn(`Direct chat ${chatData.id} found, but no other participant was resolved.`);
             chatName = 'Usuario desconocido';
           }
         } else {
-          chatName = `Grupo: ${chatData.id.substring(0, 8)}`;
-          console.log(`Chat ${chatData.id} is group. Name: ${chatName}`);
+          chatName = `Grupo: ${chatData.id.substring(0, 8)}`; // Asume nombre de grupo genérico si no hay un campo 'name'
+          // console.log(`Chat ${chatData.id} is group. Name: ${chatName}`); // Demasiado verboso
         }
 
         const { data: lastMessageData, error: lastMessageError } = await supabase
@@ -116,17 +130,44 @@ const ChatPage = () => {
           .eq('profile_id', myProfileId)
           .single();
 
+        if (lastReadError) {
+          console.error(`Error al obtener last_read_at para chat ${chatData.id}:`, lastReadError.message);
+        }
+
         if (!lastReadError && lastReadData?.last_read_at) {
+          console.log(`Chat ${chatData.id}: Mi last_read_at es ${lastReadData.last_read_at}`); // Log clave
+
+          // Consulta para contar mensajes no leídos:
+          // 1. sent_at DEBE ser mayor que last_read_at.
+          // 2. sender_id NO DEBE ser tu propio profileId.
           const { count, error: unreadError } = await supabase
             .from('messages')
             .select('*', { count: 'exact', head: true })
             .eq('chat_id', chatData.id)
-            .gt('sent_at', lastReadData.last_read_at);
+            .gt('sent_at', lastReadData.last_read_at)
+            .neq('sender_id', myProfileId); // <-- ¡Esta es la adición clave!
 
-          if (!unreadError && count) {
+          if (!unreadError && count !== null) {
             unreadCount = count;
+            console.log(`Chat ${chatData.id}: Mensajes no leídos calculados: ${unreadCount}`);
+          } else if (unreadError) {
+            console.error(`Error al contar mensajes no leídos para chat ${chatData.id}:`, unreadError.message);
+          }
+        } else {
+          // Si no hay last_read_at (chat nuevo para el usuario, por ejemplo), contamos solo los de otros
+          const { count, error: totalMessagesError } = await supabase
+            .from('messages')
+            .select('*', { count: 'exact', head: true })
+            .eq('chat_id', chatData.id)
+            .neq('sender_id', myProfileId); // <-- También añadir aquí
+          if (!totalMessagesError && count !== null) { // Usar 'count' en lugar de 'totalMessagesError' para el valor
+            unreadCount = count;
+            console.log(`Chat ${chatData.id}: No last_read_at. Total mensajes de otros: ${unreadCount}`);
+          } else if (totalMessagesError) {
+            console.error(`Error al contar todos los mensajes de otros para chat ${chatData.id}:`, totalMessagesError.message);
           }
         }
+
 
         return {
           id: chatData.id,
@@ -141,10 +182,11 @@ const ChatPage = () => {
       });
 
       const resolvedChats = await Promise.all(chatListPromises);
-      console.log("Resolved chats for sidebar:", resolvedChats);
+      console.log("FetchUserChats: Chats resueltos ANTES de ordenar:", resolvedChats); // Nuevo log
       setChats(resolvedChats.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at)));
+      console.log("FetchUserChats: Chats actualizados y ordenados en el estado."); // Nuevo log
     } catch (error) {
-      console.error("Error al cargar chats:", error.message);
+      console.error("FetchUserChats: Error al cargar chats:", error.message);
       setChats([]);
     }
   }, [myProfileId]);
@@ -203,6 +245,10 @@ const ChatPage = () => {
       if (chatParticipantsSubscriptionRef.current) {
         supabase.removeChannel(chatParticipantsSubscriptionRef.current);
         chatParticipantsSubscriptionRef.current = null;
+      }
+      if (chatsSubscriptionRef.current) { // Limpia también esta suscripción al resetear la vista
+        supabase.removeChannel(chatsSubscriptionRef.current);
+        chatsSubscriptionRef.current = null;
       }
       console.log("No chatId or myProfileId, resetting chat view.");
       return;
@@ -271,7 +317,14 @@ const ChatPage = () => {
           sender: msg.sender_id === myProfileId ? "me" : "other",
           user: msg.profiles?.full_name || 'Desconocido',
           text: msg.content,
-          time: new Date(msg.sent_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          // MODIFICADO: Formato de hora en la zona horaria LOCAL del usuario.
+          // 'es-ES' para asegurar el formato de 24 horas y convenciones españolas.
+          time: new Date(msg.sent_at).toLocaleTimeString('es-ES', {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false, // Asegura formato 24h
+            // La zona horaria local del usuario se usará automáticamente.
+          }),
         })));
         console.log("Messages loaded:", fetchedMessages.length);
 
@@ -284,6 +337,7 @@ const ChatPage = () => {
 
         if (updateReadError) console.error("Error al actualizar last_read_at:", updateReadError.message);
         else {
+          console.log("last_read_at actualizado al cargar el chat. Recargando chats...");
           // Una vez actualizado en la DB, dispara la recarga de chats para que la sidebar se actualice
           fetchUserChats();
         }
@@ -317,12 +371,19 @@ const ChatPage = () => {
                 sender: payload.new.sender_id === myProfileId ? "me" : "other",
                 user: senderProfile?.full_name || 'Desconocido',
                 text: payload.new.content,
-                time: new Date(payload.new.sent_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                // MODIFICADO: Formato de hora en la zona horaria LOCAL del usuario.
+                time: new Date(payload.new.sent_at).toLocaleTimeString('es-ES', {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  hour12: false, // Asegura formato 24h
+                  // La zona horaria local del usuario se usará automáticamente.
+                }),
               }]);
               console.log("New message received via realtime.");
 
               // Si el mensaje no es mío, actualizo last_read_at y fuerzo la recarga de chats
               if (payload.new.sender_id !== myProfileId) {
+                console.log("Mensaje de OTRO recibido. Actualizando last_read_at y recargando chats...");
                 const { error: updateReadError } = await supabase
                   .from('chat_participants')
                   .update({ last_read_at: new Date().toISOString() })
@@ -418,11 +479,45 @@ const ChatPage = () => {
       chatParticipantsSubscriptionRef.current = channel;
     };
 
+    // NUEVA FUNCIÓN: Suscribirse a cambios en la tabla 'chats' para reordenamiento
+    const subscribeToChatUpdates = () => {
+      console.log("Subscribing to chat updates for general reordering.");
+
+      if (chatsSubscriptionRef.current) {
+        supabase.removeChannel(chatsSubscriptionRef.current);
+      }
+
+      // Supabase Realtime Channel para la tabla 'chats'
+      const channel = supabase
+        .channel('public:chats') // Nombre del canal para la tabla chats
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE', // Solo nos interesan los UPDATES para updated_at
+            schema: 'public',
+            table: 'chats'
+          },
+          (payload) => {
+            // Este payload contendrá el chat_id y el nuevo updated_at
+            console.log("Chat update received via realtime:", payload.new);
+
+            // Forzamos la recarga de todos los chats para que el orden se actualice
+            // Esto es crucial para reflejar el cambio de updated_at
+            fetchUserChats();
+          }
+        )
+        .subscribe();
+
+      chatsSubscriptionRef.current = channel;
+    };
+
+
     loadCurrentChatDetails();
     loadMessages();
     subscribeToNewMessages();
     setupPresence();
     subscribeToChatParticipantsChanges();
+    subscribeToChatUpdates(); // ¡Llama a la nueva suscripción aquí!
 
     return () => {
       console.log(`Cleaning up subscriptions for chat ID: ${chatId}`);
@@ -438,6 +533,10 @@ const ChatPage = () => {
       if (chatParticipantsSubscriptionRef.current) {
         supabase.removeChannel(chatParticipantsSubscriptionRef.current);
         chatParticipantsSubscriptionRef.current = null;
+      }
+      if (chatsSubscriptionRef.current) { // Limpia también esta suscripción
+        supabase.removeChannel(chatsSubscriptionRef.current);
+        chatsSubscriptionRef.current = null;
       }
     };
   }, [chatId, myProfileId, fetchUserChats]);
@@ -463,6 +562,26 @@ const ChatPage = () => {
         throw error;
       }
       setNewMessage("");
+      setShowEmojiPicker(false); // Ocultar el selector de emojis después de enviar
+
+      // DESPUÉS de enviar mi propio mensaje, marcar el chat como leído para mí.
+      // Ya no necesitamos capturar el timestamp exacto del mensaje si la lógica de conteo
+      // de no leídos ignora mis propios mensajes.
+      const nowIso = new Date().toISOString();
+      console.log("handleSendMessage: Intentando actualizar last_read_at a:", nowIso, "para chat:", chatId, "y perfil:", myProfileId);
+      const { error: updateReadError } = await supabase
+        .from('chat_participants')
+        .update({ last_read_at: nowIso })
+        .eq('chat_id', chatId)
+        .eq('profile_id', myProfileId);
+
+      if (updateReadError) {
+        console.error("handleSendMessage: Error al actualizar last_read_at después de enviar mi propio mensaje:", updateReadError.message);
+      } else {
+        console.log("handleSendMessage: last_read_at actualizado con éxito después de enviar mi mensaje. Recargando chats...");
+        // Recargar los chats para que la sidebar actualice los contadores.
+        fetchUserChats();
+      }
 
     } catch (error) {
       console.error("Error al enviar mensaje:", error.message);
@@ -476,7 +595,6 @@ const ChatPage = () => {
     }
 
     try {
-      // --- INICIO DE LA CORRECCIÓN CLAVE ---
       // 1. Buscar en la tabla 'chat_participants' todas las entradas que involucran a cualquiera de los dos perfiles.
       const { data: existingChatParticipants, error: existingChatParticipantsError } = await supabase
         .from('chat_participants')
@@ -502,13 +620,11 @@ const ChatPage = () => {
 
           // Verificamos que el chat_id tiene exactamente 2 participantes
           // Y que esos 2 participantes son myProfileId y otherProfileId.
-          // Esto asegura que es un chat directo entre ellos y no un grupo, etc.
           if (participantsInChat.length === 2 &&
             participantsInChat.includes(myProfileId) &&
             participantsInChat.includes(otherProfileId)) {
 
             // Finalmente, para estar seguros, confirmamos que el 'type' de este chat es 'direct'
-            // (esto es una capa adicional de seguridad, aunque la lógica anterior ya debería filtrar bien).
             const { data: chatTypeData, error: chatTypeError } = await supabase
               .from('chats')
               .select('type')
@@ -522,7 +638,6 @@ const ChatPage = () => {
           }
         }
       }
-      // --- FIN DE LA CORRECCIÓN CLAVE ---
 
       if (foundChatId) {
         console.log("Chat existente encontrado:", foundChatId);
@@ -562,10 +677,12 @@ const ChatPage = () => {
   const handleSearchUsers = useCallback(async (term) => {
     if (term.trim() === "") {
       setSearchResults([]);
+      console.log("DEBUG: Término de búsqueda vacío, reseteando resultados.");
       return;
     }
 
     try {
+      console.log("DEBUG: Buscando usuarios con término:", term); // <-- Log de depuración
       const { data, error } = await supabase
         .from('profiles')
         .select('id, full_name, avatar_url')
@@ -573,12 +690,16 @@ const ChatPage = () => {
         .neq('id', myProfileId)
         .limit(10);
 
-      if (error) throw error;
+      if (error) {
+        console.error("DEBUG: Error al buscar usuarios en Supabase:", error.message); // <-- Log de depuración
+        throw error;
+      }
 
+      console.log("DEBUG: Resultados de búsqueda obtenidos:", data); // <-- Log de depuración
       setSearchResults(data);
 
     } catch (error) {
-      console.error("Error al buscar usuarios:", error.message);
+      console.error("DEBUG: Error capturado en handleSearchUsers:", error.message); // <-- Log de depuración
       setSearchResults([]);
     }
   }, [myProfileId]);
@@ -631,180 +752,57 @@ const ChatPage = () => {
 
 
   return (
-    <div className="container mx-auto h-[calc(100vh-128px)] flex border rounded-lg shadow-xl my-4 overflow-hidden">
+    <div className="container mx-auto h-[calc(100vh-128px)] flex border rounded-lg shadow-xl my-4 overflow-visible">
       {/* Sidebar de Chats */}
-      <aside className={`flex-col md:flex w-full md:w-1/3 border-r bg-muted/50 ${showChatList ? 'flex' : 'hidden'}`}>
-        <div className="p-4 border-b">
-          <div className="relative">
-            <Input
-              placeholder="Buscar chats o personas..."
-              className="pl-10"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-muted-foreground" />
-          </div>
-          {/* Resultados de la búsqueda */}
-          {searchTerm.length > 0 && searchResults.length > 0 && (
-            <div className="absolute z-10 w-[calc(100%-2rem)] md:w-[calc(33.33%-2rem)] bg-popover border rounded-md shadow-lg mt-2 overflow-hidden max-h-60 overflow-y-auto">
-              {searchResults.map((user) => (
-                <div
-                  key={user.id}
-                  className="flex items-center space-x-3 p-3 hover:bg-accent cursor-pointer"
-                  onClick={() => handleUserClick(user.id)}
-                >
-                  <Avatar className="h-9 w-9">
-                    <AvatarImage src={user.avatar_url || "https://images.unsplash.com/photo-1694388001616-1176f534d72f"} alt={user.full_name} />
-                    <AvatarFallback>{user.full_name ? user.full_name.substring(0, 1) : '?'}</AvatarFallback>
-                  </Avatar>
-                  <span className="font-medium">{user.full_name}</span>
-                </div>
-              ))}
-            </div>
-          )}
-          {searchTerm.length > 0 && searchResults.length === 0 && (
-            <div className="p-3 text-center text-muted-foreground text-sm">
-              No se encontraron usuarios.
-            </div>
-          )}
-        </div>
-        <nav className="flex-1 overflow-y-auto">
-          {chats.length > 0 ? (
-            chats.map(chat => (
-              <div key={chat.id} className="relative group">
-                {/* Al hacer clic en un chat, también ocultamos la lista en móvil */}
-                <Link to={`/chat/${chat.id}`} className="block" onClick={() => setShowChatList(false)}>
-                  <motion.div
-                    className={`p-4 flex items-center space-x-3 hover:bg-accent cursor-pointer border-b ${chatId === chat.id ? 'bg-accent' : ''}`}
-                    // ¡RECUERDA CORREGIR ESTO EN TU CSS!
-                    // Esta línea: `whileHover={{ backgroundColor: "var(--accent)" }}`
-                    // Es lo que causa la advertencia de CSS "Invalid keyframe value..." si var(--accent) no es un color válido.
-                    // Asegúrate de que `--accent` en tu archivo CSS sea algo como `hsl(220 67% 95%)` o un color HEX/RGB.
-                    whileHover={{ backgroundColor: "var(--accent)" }}
-                  >
-                    <Avatar className="h-12 w-12">
-                      <AvatarImage src={chat.avatar_url || "https://images.unsplash.com/photo-1694388001616-1176f534d72f"} alt={chat.name} />
-                      <AvatarFallback>{chat.name ? chat.name.substring(0, 1) : '?'}</AvatarFallback>
-                      {chat.type === 'direct' && chat.otherParticipantId && onlineUsers.has(chat.otherParticipantId) && (
-                        <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-background"></div>
-                      )}
-                    </Avatar>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold truncate">{chat.name}</p>
-                      <p className="text-sm text-muted-foreground truncate">{chat.lastMessage}</p>
-                    </div>
-                    {chat.unread > 0 && (
-                      <div className="bg-primary text-primary-foreground text-xs rounded-full h-5 w-5 flex items-center justify-center">
-                        {chat.unread}
-                      </div>
-                    )}
-                  </motion.div>
-                </Link>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="absolute top-1/2 right-4 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-10"
-                  onClick={(e) => handleDeleteChat(e, chat.id)}
-                  title="Eliminar chat"
-                >
-                  <Trash2 className="h-5 w-5 text-destructive" />
-                </Button>
-              </div>
-            ))
-          ) : (
-            <div className="p-4 text-center text-muted-foreground">
-              No tienes chats activos.
-              <Link to="/comunidades" className="mt-6">
-                <Button>Explorar Comunidades</Button>
-              </Link>
-            </div>
-          )}
-        </nav>
-      </aside>
+      {/* Las clases 'w-full md:w-1/3' y 'hidden/flex md:flex' ahora controlan la visibilidad de ChatListSidebar */}
+      <div className={`
+        ${showChatList ? 'flex' : 'hidden'}
+        flex-col w-full md:w-1/3 border-r bg-muted/50
+        md:flex
+      `}>
+        <ChatListSidebar
+          chats={chats}
+          chatId={chatId}
+          searchTerm={searchTerm}
+          setSearchTerm={setSearchTerm}
+          searchResults={searchResults}
+          handleUserClick={handleUserClick}
+          handleDeleteChat={handleDeleteChat}
+          onlineUsers={onlineUsers}
+          setShowChatList={setShowChatList} // Pasa setShowChatList al sidebar para el clic
+        />
+      </div>
 
       {/* Área de Mensajes */}
       {/* Mostrar solo si hay un chat seleccionado O si la lista de chats está oculta (en móvil) */}
-      <main className={`flex-col md:flex w-full md:w-2/3 bg-background ${currentChat || !showChatList ? 'flex' : 'hidden'}`}>
+      <main className={`
+        ${currentChat || !showChatList ? 'flex' : 'hidden'}
+        flex-col w-full md:w-2/3 bg-background
+        md:flex
+      `}>
         {currentChat ? (
           <>
-            <header className="p-4 border-b flex justify-between items-center bg-muted/20">
-              <div className="flex items-center space-x-3">
-                {/* Botón de volver en móvil */}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="md:hidden mr-2" // Ocultar en pantallas medianas y mayores
-                  onClick={() => {
-                    navigate('/chat'); // Volver a la ruta base de chat (lista)
-                    setShowChatList(true); // Mostrar la lista de chats
-                  }}
-                >
-                  <ArrowLeft className="h-5 w-5" />
-                </Button>
-
-                <Avatar className="h-10 w-10">
-                  <AvatarImage src={currentChat.avatar_url || "https://images.unsplash.com/photo-1694388001616-1176f594d72f"} alt={currentChat.name} />
-                  <AvatarFallback>{currentChat.name ? currentChat.name.substring(0, 1) : '?'}</AvatarFallback>
-                </Avatar>
-                <div>
-                  <h2 className="text-lg font-semibold">{currentChat.name}</h2>
-                  {currentChat.type === 'direct' && currentChat.otherParticipantId && onlineUsers.has(currentChat.otherParticipantId) ? (
-                    <p className="text-xs text-green-500">En línea</p>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">Desconectado</p>
-                  )}
-                </div>
-              </div>
-            </header>
-            <div className="flex-1 p-6 space-y-4 overflow-y-auto bg-primary-light">
-              {messages.map((msg, index) => (
-                <motion.div
-                  key={index}
-                  className={`flex ${msg.sender === 'me' ? 'justify-end' : 'justify-start'}`}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.2 }}
-                >
-                  <div className={`max-w-[75%] md:max-w-xs lg:max-w-md p-3 rounded-xl shadow ${msg.sender === 'me' ? 'bg-primary text-primary-foreground' : 'bg-card text-card-foreground border'}`}>
-                    <p className="text-sm">{msg.text}</p>
-                    <p className={`text-xs mt-1 ${msg.sender === 'me' ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>{msg.time}</p>
-                  </div>
-                </motion.div>
-              ))}
-              <div ref={messagesEndRef} />
-            </div>
-            <footer className="p-4 border-t bg-muted/20 relative">
-              {showEmojiPicker && (
-                <div className="absolute bottom-full left-0 mb-2 z-20">
-                  <EmojiPicker onEmojiClick={onEmojiClick} theme="auto" />
-                </div>
-              )}
-              <form onSubmit={handleSendMessage} className="flex items-center space-x-3">
-                <Button variant="ghost" size="icon" type="button" onClick={toggleEmojiPicker}>
-                  <Smile className="h-5 w-5" />
-                </Button>
-                <Input
-                  ref={inputRef}
-                  value={newMessage}
-                  onChange={(e) => setNewMessage(e.target.value)}
-                  placeholder="Escribe un mensaje..."
-                  className="flex-1"
-                />
-                <Button type="submit" size="icon" className="bg-primary hover:bg-primary/90">
-                  <Send className="h-5 w-5" />
-                </Button>
-              </form>
-            </footer>
+            <ChatHeader
+              currentChat={currentChat}
+              onlineUsers={onlineUsers}
+              setShowChatList={setShowChatList} // Pasa setShowChatList al header
+            />
+            <ChatMessageArea
+              messages={messages}
+              messagesEndRef={messagesEndRef}
+            />
+            <ChatInput
+              newMessage={newMessage}
+              setNewMessage={setNewMessage}
+              handleSendMessage={handleSendMessage}
+              showEmojiPicker={showEmojiPicker}
+              toggleEmojiPicker={toggleEmojiPicker}
+              onEmojiClick={onEmojiClick}
+              inputRef={inputRef}
+            />
           </>
         ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
-            <MessageSquare className="h-24 w-24 text-muted-foreground mb-6" />
-            <h2 className="text-2xl font-semibold text-foreground">Bienvenido a Rooms Chat</h2>
-            <p className="text-muted-foreground mt-2 max-w-sm">Selecciona una conversación para empezar a chatear o explora comunidades para conectar con gente nueva.</p>
-            <Link to="/comunidades" className="mt-6">
-              <Button>Explorar Comunidades</Button>
-            </Link>
-          </div>
+          <ChatWelcomeScreen />
         )}
       </main>
     </div>

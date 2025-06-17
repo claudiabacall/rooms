@@ -8,8 +8,8 @@ import MobileMenu from "@/components/layout/MobileMenu.jsx";
 import AuthButtons from "@/components/layout/AuthButtons.jsx";
 import ThemeToggle from "@/components/layout/ThemeToggle.jsx";
 import {
-  Menu,
-  X,
+  // Menu, // ELIMINADO: Se quita el icono de menú de hamburguesa
+  // X,    // ELIMINADO: Se quita el icono de cerrar menú
   Search,
   Heart,
   User as UserIconLucide,
@@ -19,7 +19,7 @@ import {
   LogIn,
   UserPlus,
   Settings,
-  Home
+  Store // IMPORTADO: Nuevo icono para Marketplace
 } from "lucide-react";
 import { useAuth } from "@/contexts/SupabaseAuthContext.jsx";
 import {
@@ -42,6 +42,7 @@ const Header = ({
 
   const baseNavItems = [
     { path: "/habitaciones", label: "Buscar", icon: <Search className="h-5 w-5" /> },
+    { path: "/marketplace", label: "Marketplace", icon: <Store className="h-5 w-5" /> }, // AÑADIDO: Marketplace
   ];
 
   const loggedInNavItems = [
@@ -49,13 +50,16 @@ const Header = ({
     { path: "/comunidades", label: "Comunidades", icon: <UsersIcon className="h-5 w-5" /> },
     { path: "/favoritos", label: "Favoritos", icon: <Heart className="h-5 w-5" /> },
     { path: "/chat", label: "Mensajes", icon: <MessageSquare className="h-5 w-5" /> },
-    { path: "/mis-propiedades", label: "Mis propiedades", icon: <Home className="h-5 w-5" /> },
+    // { path: "/mis-propiedades", label: "Mis propiedades", icon: <Home className="h-5 w-5" /> }, // ELIMINADO: Mis propiedades
   ];
 
   const navItemsForDesktop = isAuthenticated ? loggedInNavItems : baseNavItems;
 
   const navItemsForMobile = isAuthenticated
-    ? [...loggedInNavItems, { path: "/perfil", label: "Perfil", icon: <UserIconLucide className="h-5 w-5" /> }]
+    ? [
+      ...baseNavItems,
+      // { path: "/perfil", label: "Perfil", icon: <UserIconLucide className="h-5 w-5" /> }, // ELIMINADO: Mi Perfil en móvil
+    ]
     : [
       ...baseNavItems,
       { path: "/login", label: "Login", icon: <LogIn className="h-5 w-5" /> },
@@ -145,14 +149,15 @@ const Header = ({
           ) : (
             <div className="hidden md:flex">
               <AuthButtons
-                isLoggedIn={isAuthenticated} // This prop might become redundant if AuthButtons uses useAuth directly
-                handleLogout={logout} // This prop might become redundant if AuthButtons uses useAuth directly
+                isLoggedIn={isAuthenticated}
+                handleLogout={logout}
                 isMobile={false}
               />
             </div>
           )}
 
-          <div className="flex items-center md:hidden">
+          {/* ELIMINADO: El botón del menú de hamburguesa */}
+          {/* <div className="flex items-center md:hidden">
             <Button
               variant="ghost"
               size="icon"
@@ -161,7 +166,7 @@ const Header = ({
             >
               {mobileMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
             </Button>
-          </div>
+          </div> */}
         </div>
       </div>
 

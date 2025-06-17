@@ -1,6 +1,7 @@
 import React from "react";
 import { Link } from "react-router-dom";
-import { Search, MessageSquare, User as UserIconLucide, Users } from "lucide-react"; // Home ya no es necesario, lo eliminamos
+// Importamos el icono de Store para Marketplace
+import { Search, MessageSquare, Users, Store } from "lucide-react"; // Home y UserIconLucide ya no son necesarios aquí
 
 const BottomNav = ({ currentPath }) => {
   const navItems = [
@@ -8,7 +9,8 @@ const BottomNav = ({ currentPath }) => {
     { path: "/habitaciones", label: "Buscar", icon: <Search className="h-6 w-6" /> },
     { path: "/comunidades", label: "Comunidades", icon: <Users className="h-6 w-6" /> },
     { path: "/chat", label: "Mensajes", icon: <MessageSquare className="h-6 w-6" /> },
-    { path: "/perfil", label: "Perfil", icon: <UserIconLucide className="h-6 w-6" /> },
+    // Cambiado: "Perfil" por "Marketplace"
+    { path: "/marketplace", label: "Marketplace", icon: <Store className="h-6 w-6" /> },
   ];
 
   return (
@@ -17,8 +19,7 @@ const BottomNav = ({ currentPath }) => {
         <Link
           key={item.path}
           to={item.path}
-          // La lógica de 'active' se mantiene, pero ten en cuenta que '/' ya no será una ruta activa aquí.
-          // Si tu página principal ahora es una de estas, asegúrate de que currentPath refleje eso.
+          // La lógica de 'active' se mantiene.
           className={`bottom-nav-item ${currentPath === item.path || (item.path !== "/" && currentPath.startsWith(item.path)) ? "active" : ""}`}
         >
           {item.icon}

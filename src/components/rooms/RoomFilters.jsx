@@ -6,17 +6,17 @@ import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input"; // Importar el componente Input
 import {
   X,
   Wifi,
-  Utensils, // Cambiado Coffee por Utensils para cocina
+  Utensils,
   Bath,
   ParkingCircle,
-  Bed, // Icono para Amueblado (Bed o Home)
-  Tv, // Para TV
-  Fan, // Para Aire Acondicionado
-  WashingMachine, // Para Lavadora
-  // Puedes añadir más iconos de Lucide si necesitas para otros amenities
+  Bed,
+  Tv,
+  Fan,
+  WashingMachine,
 } from "lucide-react";
 
 // Lista de comodidades, con IDs que coinciden con las claves booleanas de tu DB
@@ -25,20 +25,12 @@ const amenitiesList = [
   { id: "has_kitchen_access", label: "Acceso Cocina", icon: <Utensils className="h-4 w-4 mr-2" /> },
   { id: "has_private_bathroom", label: "Baño Privado", icon: <Bath className="h-4 w-4 mr-2" /> },
   { id: "has_parking", label: "Parking", icon: <ParkingCircle className="h-4 w-4 mr-2" /> },
-  { id: "is_furnished", label: "Amueblado", icon: <Bed className="h-4 w-4 mr-2" /> }, // Asumiendo 'is_furnished' para amueblado
-  { id: "has_tv", label: "TV", icon: <Tv className="h-4 w-4 mr-2" /> }, // Añadido TV
-  { id: "has_air_condition", label: "Aire Acondicionado", icon: <Fan className="h-4 w-4 mr-2" /> }, // Añadido Aire Acondicionado
-  { id: "has_washing_room", label: "Lavadora", icon: <WashingMachine className="h-4 w-4 mr-2" /> }, // Añadido Lavadora
-  // Los siguientes no tienen correspondencia directa en tu mapeo de DB actual,
-  // si los necesitas, asegúrate de añadirlos como columnas booleanas en tu tabla 'rooms'
-  // y mapearlos en roomsService.js.
-  // { id: "desk", label: "Escritorio", icon: <BedDouble className="h-4 w-4 mr-2" /> },
-  // { id: "balcony", label: "Balcón", icon: <BedDouble className="h-4 w-4 mr-2" /> },
-  // { id: "quiet_zone", label: "Zona Tranquila", icon: <BedDouble className="h-4 w-4 mr-2" /> },
+  { id: "is_furnished", label: "Amueblado", icon: <Bed className="h-4 w-4 mr-2" /> },
+  { id: "has_tv", label: "TV", icon: <Tv className="h-4 w-4 mr-2" /> },
+  { id: "has_air_condition", label: "Aire Acondicionado", icon: <Fan className="h-4 w-4 mr-2" /> },
+  { id: "has_washing_room", label: "Lavadora", icon: <WashingMachine className="h-4 w-4 mr-2" /> },
 ];
 
-// Los tipos de habitación de tu DB no están en el mapeo de roomsService.js.
-// Si los necesitas, deberías añadirlos a la tabla 'rooms' y mapearlos.
 const roomTypes = ["all", "Privada", "Compartida", "Estudio", "Apartamento", "Loft", "Ático"];
 
 const RoomFilters = ({
@@ -47,14 +39,29 @@ const RoomFilters = ({
   setPriceRange,
   selectedAmenities,
   handleAmenityChange,
-  selectedType, // Se mantiene, pero su funcionalidad depende de que tengas un campo 'type' en tu DB
-  setSelectedType, // Se mantiene
+  selectedType,
+  setSelectedType,
   resetFilters,
   availableStartDate,
   setAvailableStartDate,
   availableEndDate,
   setAvailableEndDate
 }) => {
+
+  // Manejador para los inputs de precio
+  const handleMinPriceChange = (e) => {
+    const value = Number(e.target.value);
+    // Asegurarse de que el valor no sea NaN y esté dentro de los límites
+    const newMin = isNaN(value) ? 0 : Math.max(0, Math.min(value, priceRange[1]));
+    setPriceRange([newMin, priceRange[1]]);
+  };
+
+  const handleMaxPriceChange = (e) => {
+    const value = Number(e.target.value);
+    const newMax = isNaN(value) ? 50000 : Math.min(Math.max(value, priceRange[0]), 50000);
+    setPriceRange([priceRange[0], newMax]);
+  };
+
   return (
     <motion.div
       initial={false}
@@ -71,14 +78,35 @@ const RoomFilters = ({
             <Slider
               id="price-range"
               min={0}
-              // El máximo debería ser realista, 1000 era un poco bajo para algunos escenarios
-              max={2000} // Ajustado a 2000, puedes cambiarlo según tus necesidades
+              max={50000} // Ajustado a 50.000
               step={10}
               value={priceRange}
               onValueChange={setPriceRange}
               className="my-4"
             />
-            <div className="flex justify-between text-sm text-muted-foreground">
+            {/* Inputs para introducir valores de precio */}
+            <div className="flex justify-between items-center gap-2 mt-2">
+              <Input
+                type="number"
+                min="0"
+                max="50000" // Coincide con el max del slider
+                placeholder="Mín."
+                value={priceRange[0]}
+                onChange={handleMinPriceChange}
+                className="w-1/2 p-2 text-sm"
+              />
+              <span className="text-muted-foreground">-</span>
+              <Input
+                type="number"
+                min="0"
+                max="50000" // Coincide con el max del slider
+                placeholder="Máx."
+                value={priceRange[1]}
+                onChange={handleMaxPriceChange}
+                className="w-1/2 p-2 text-sm"
+              />
+            </div>
+            <div className="flex justify-between text-sm text-muted-foreground mt-2">
               <span>€{priceRange[0]}</span>
               <span>€{priceRange[1]}</span>
             </div>
@@ -92,9 +120,7 @@ const RoomFilters = ({
                 <div key={amenity.id} className="flex items-center space-x-2">
                   <Checkbox
                     id={`filter-${amenity.id}`}
-                    // Comprobamos si el ID del amenity (ej. "has_wifi") está en el array selectedAmenities
                     checked={selectedAmenities.includes(amenity.id)}
-                    // Cuando se hace clic, pasamos el ID del amenity (ej. "has_wifi")
                     onCheckedChange={() => handleAmenityChange(amenity.id)}
                   />
                   <Label htmlFor={`filter-${amenity.id}`} className="flex items-center text-sm font-normal cursor-pointer">

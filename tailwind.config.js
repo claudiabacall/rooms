@@ -12,7 +12,13 @@ module.exports = {
       center: true,
       padding: "2rem",
       screens: {
-        "2xl": "1400px",
+        // RE-INTRODUCIR LOS BREAKPOINTS POR DEFECTO DE TAILWIND
+        // Estos son los valores predeterminados. Puedes ajustarlos si lo necesitas.
+        sm: '640px',
+        md: '768px',
+        lg: '1024px',
+        xl: '1280px',
+        '2xl': '1400px', // Tu breakpoint 2xl se mantiene
       },
     },
     extend: {

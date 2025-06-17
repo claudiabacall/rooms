@@ -2,16 +2,17 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
-import { Search, Filter, PlusCircle, Loader2 } from "lucide-react";
+import { Search, Filter, PlusCircle, Loader2, Edit, Trash2 } from "lucide-react"; // Añadimos Edit y Trash2
 import { useToast } from "@/components/ui/use-toast";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import RoomCard from "@/components/rooms/RoomCard.jsx";
 import RoomFilters from "@/components/rooms/RoomFilters.jsx";
-import { fetchRooms } from "@/services/roomsService";
+// Importamos fetchRooms y la nueva fetchUserRooms
+import { fetchRooms, fetchUserRooms, deleteRoom as deleteRoomService } from "@/services/roomsService";
 import { useAuth } from "@/contexts/SupabaseAuthContext";
 import useFavorites from "@/hooks/useFavorites";
-import { Label } from "@/components/ui/label"; // Aunque no se usa directamente en este snippet, se mantiene por si es necesario en el futuro.
+import { Label } from "@/components/ui/label";
 
 const RoomsPage = () => {
   const location = useLocation();
@@ -35,24 +36,42 @@ const RoomsPage = () => {
   const [loadingRooms, setLoadingRooms] = useState(true);
   const [error, setError] = useState(null);
 
+  // Estados para la paginación
+  const [currentPage, setCurrentPage] = useState(0); // Página actual (0-indexed)
+  const roomsPerPage = 100; // Cuántas habitaciones por página
+  const [totalRoomsCount, setTotalRoomsCount] = useState(0); // Total de habitaciones disponibles en la DB
+
   const [searchTerm, setSearchTerm] = useState(initialSearch);
-  const [priceRange, setPriceRange] = useState([0, 2000]);
+  const [priceRange, setPriceRange] = useState([0, 50000]); // Valor inicial ajustado a 50000
   const [selectedAmenities, setSelectedAmenities] = useState([]);
   const [selectedType, setSelectedType] = useState("all");
   const [availableStartDate, setAvailableStartDate] = useState("");
   const [availableEndDate, setAvailableEndDate] = useState("");
   const [showFilters, setShowFilters] = useState(false);
-  const [showOnlyMine, setShowOnlyMine] = useState(false);
+  const [showOnlyMine, setShowOnlyMine] = useState(false); // Estado para el filtro "Mis pisos"
 
+  // Refactorizamos loadRooms para usar fetchRooms o fetchUserRooms
   const loadRooms = useCallback(async () => {
     setLoadingRooms(true);
     setError(null);
     try {
-      // Asegúrate de que fetchRooms trae la información del host, por ejemplo:
-      // en tu roomsService.js, la consulta de Supabase debería incluir algo como:
-      // .select('*, host_profile:profiles(id, full_name, avatar_url)')
-      const data = await fetchRooms();
-      setAllRooms(data);
+      const offset = currentPage * roomsPerPage;
+      let data, count;
+
+      if (showOnlyMine && user?.id) {
+        // Si el filtro "Mis pisos" está activo y hay un usuario, usa fetchUserRooms
+        ({ data, count } = await fetchUserRooms(user.id, offset, roomsPerPage));
+      } else {
+        // De lo contrario, usa fetchRooms para todos (o según RLS)
+        ({ data, count } = await fetchRooms(offset, roomsPerPage));
+      }
+
+      console.log("Datos recibidos de fetchRooms (o fetchUserRooms):", data, "Total de habitaciones (count):", count); // Debugging
+      setAllRooms(prevRooms => {
+        // Si la página es 0 o el filtro cambia, reinicia la lista
+        return currentPage === 0 ? data : [...prevRooms, ...data];
+      });
+      setTotalRoomsCount(count);
     } catch (err) {
       console.error("Error loading rooms:", err);
       setError("No se pudieron cargar las habitaciones.");
@@ -64,19 +83,32 @@ const RoomsPage = () => {
     } finally {
       setLoadingRooms(false);
     }
-  }, [toast]);
+  }, [toast, currentPage, roomsPerPage, showOnlyMine, user]); // Añade showOnlyMine y user como dependencias
 
   useEffect(() => {
     loadRooms();
   }, [loadRooms]);
 
+  // Resetear la paginación al cambiar filtros o búsqueda (y al cambiar showOnlyMine)
+  useEffect(() => {
+    setCurrentPage(0); // Reinicia a la primera página al aplicar cualquier filtro
+    // Cuando showOnlyMine cambia, necesitamos recargar desde la DB, no solo filtrar el estado local
+    // El useEffect de loadRooms ya se encarga de esto al tener showOnlyMine como dependencia
+  }, [
+    searchTerm,
+    priceRange,
+    selectedAmenities,
+    selectedType,
+    availableStartDate,
+    availableEndDate,
+    showOnlyMine, // Importante: dependencia para que se active cuando cambia "Mis pisos"
+  ]);
+
+
+  // Aplica los filtros locales (excepto showOnlyMine que ya se maneja en loadRooms)
   useEffect(() => {
     let tempRooms = allRooms;
-
-    if (showOnlyMine && user?.id) {
-      // Filtra por el ID del host del piso (asumiendo room.host_id o room.host_profile.id existe y se carga)
-      tempRooms = tempRooms.filter(room => room.host_id === user.id || room.host_profile?.id === user.id);
-    }
+    console.log("allRooms al inicio del filtro local (para debug):", allRooms); // Debugging
 
     if (searchTerm) {
       const keywords = searchTerm.toLowerCase().split(" ").filter(Boolean);
@@ -98,13 +130,11 @@ const RoomsPage = () => {
 
     if (selectedAmenities.length > 0) {
       tempRooms = tempRooms.filter(room => {
-        // Asegurarse de que `room.amenities` sea un array para poder usar `includes`
         const roomAmenities = Array.isArray(room.amenities) ? room.amenities : [];
         return selectedAmenities.every(amenityKey => roomAmenities.includes(amenityKey));
       });
     }
 
-    // Si 'type' no está en tu DB ni mapeado, esta sección no tendrá efecto.
     // if (selectedType !== "all") {
     //   tempRooms = tempRooms.filter(room => room.type === selectedType);
     // }
@@ -124,6 +154,7 @@ const RoomsPage = () => {
     }
 
     setFilteredRooms(tempRooms);
+    console.log("filteredRooms final (para debug):", tempRooms); // Debugging
   }, [
     searchTerm,
     priceRange,
@@ -131,9 +162,7 @@ const RoomsPage = () => {
     selectedType,
     availableStartDate,
     availableEndDate,
-    showOnlyMine,
-    allRooms,
-    user
+    allRooms, // allRooms es la base para los filtros locales
   ]);
 
   const handleAmenityChange = (amenityId) => {
@@ -144,35 +173,74 @@ const RoomsPage = () => {
 
   const resetFilters = () => {
     setSearchTerm("");
-    setPriceRange([0, 2000]);
+    setPriceRange([0, 50000]); // Reinicia el rango de precio a [0, 50000]
     setSelectedAmenities([]);
     setSelectedType("all");
     setAvailableStartDate("");
     setAvailableEndDate("");
-    setShowOnlyMine(false);
+    setShowOnlyMine(false); // También resetea este filtro
     toast({
       title: "Filtros restablecidos",
       description: "Se han eliminado todos los filtros de búsqueda.",
     });
   };
 
-  // ***** CAMBIO CLAVE AQUÍ *****
-  // Asegúrate de que esta URL coincida EXACTAMENTE con la ruta definida en App.jsx
   const handleRoomCardClick = (roomId) => {
-    navigate(`/habitaciones/${roomId}`); // ¡Ahora con "es" al final!
+    navigate(`/habitaciones/${roomId}`);
   };
-  // ******************************
 
   const handleAddRoomClick = () => {
     navigate("/crear-habitacion");
   };
 
+  const handleLoadMore = () => {
+    setCurrentPage(prevPage => prevPage + 1);
+  };
+
+  // Manejadores para Editar y Eliminar (similares a MyPropertiesPage)
+  const handleEditRoom = (roomId) => {
+    navigate(`/editar-habitacion/${roomId}`);
+  };
+
+  const handleDeleteRoom = async (roomId) => {
+    if (!window.confirm("¿Estás seguro de que quieres eliminar esta propiedad? Esta acción es irreversible.")) {
+      return;
+    }
+    setLoadingRooms(true); // Podrías usar un estado de carga más granular si lo necesitas
+    try {
+      await deleteRoomService(roomId); // Usa la función importada
+
+      toast({
+        title: "Propiedad eliminada",
+        description: "La propiedad ha sido eliminada exitosamente.",
+        variant: "default",
+      });
+      // Después de eliminar, recarga las habitaciones para actualizar la vista
+      loadRooms();
+
+    } catch (error) {
+      console.error("Error deleting room:", error);
+      toast({
+        title: "Error al eliminar",
+        description: error.message || "No se pudo eliminar la propiedad.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingRooms(false);
+    }
+  };
+
+
+  // Se muestra el botón "Ver Siguiente Página" si hay más habitaciones cargadas o por cargar
+  const hasMoreRooms = (currentPage + 1) * roomsPerPage < totalRoomsCount;
+
+  // Las sugerencias siempre se basan en allRooms (que ahora carga "todos" o "mis pisos" según el filtro showOnlyMine)
   const suggestedRooms = allRooms
     .filter(room =>
       room.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       room.location?.toLowerCase().includes(searchTerm.toLowerCase())
     )
-    .slice(0, 3);
+    .slice(0, 100);
 
   if (loadingRooms || authLoading || favoritesLoading) {
     return (
@@ -268,6 +336,33 @@ const RoomsPage = () => {
               isRoomFavorite={isFavorite(room.id)}
               onAddFavorite={addFavorite}
               onRemoveFavorite={removeFavorite}
+              // Añade actionsComponent solo si showOnlyMine es true y es la propiedad del usuario
+              actionsComponent={showOnlyMine && user && room.host_id === user.id ? (
+                <>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleEditRoom(room.id);
+                    }}
+                    title="Editar Propiedad"
+                  >
+                    <Edit className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="icon"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteRoom(room.id);
+                    }}
+                    title="Eliminar Propiedad"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </>
+              ) : null}
             />
           ))}
         </motion.div>
@@ -277,6 +372,7 @@ const RoomsPage = () => {
           <h2 className="text-2xl font-semibold mb-2">No se encontraron pisos</h2>
           <p className="text-muted-foreground mb-4">Prueba a modificar tus filtros o el término de búsqueda.</p>
 
+          {/* Mostrar sugerencias si no hay resultados filtrados */}
           {suggestedRooms.length > 0 && (
             <div className="mt-6">
               <h3 className="text-lg font-medium mb-2">Tal vez te interesen:</h3>
@@ -297,6 +393,21 @@ const RoomsPage = () => {
             </div>
           )}
         </motion.div>
+      )}
+
+      {/* Botón para cargar más habitaciones */}
+      {filteredRooms.length > 0 && hasMoreRooms && (
+        <div className="mt-8 text-center">
+          <Button onClick={handleLoadMore} disabled={loadingRooms}>
+            {loadingRooms ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Cargando...
+              </>
+            ) : (
+              "Ver Siguiente Página"
+            )}
+          </Button>
+        </div>
       )}
     </div>
   );
